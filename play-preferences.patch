@@ -1,0 +1,2254 @@
+diff --git a/Assets/OurTaiko/Runtime/Audio/SoundSettings.cs b/Assets/OurTaiko/Runtime/Audio/SoundSettings.cs
+index 7820899..0a51e9a 100644
+--- a/Assets/OurTaiko/Runtime/Audio/SoundSettings.cs
++++ b/Assets/OurTaiko/Runtime/Audio/SoundSettings.cs
+@@ -37,35 +37,59 @@ public static SoundPlatform Platform
+ #endif
+             }
+         }
++        // The labels and sentences below are authored in English and translated while the menu is
++        // built, so the Sound rows follow the settings language without a second lookup table.
++        // Set while a catalog is built so the whole page follows one language.
++        static string building;
++
++        static string T(string source) => UiText.Settings(source, building ?? UiText.Language);
++
++        // Two sentences joined the way the language writes them: a space in English, none in CJK.
++        static string Sentence(string first, string second) =>
++            T(first) + ((building ?? UiText.Language) == "en" ? " " : "") + T(second);
++
++        static string ApplyOnExit(string description) => Sentence(description, "Applies when leaving settings.");
++
+         static SettingItem Volume(string name, string description, Func<SoundVolumes, float> get, Action<SoundVolumes, float> set)
+         {
+             var choices = new string[41];
+             for (int i = 0; i < choices.Length; i++) choices[i] = (i * 5) + "%";
+-            return new SettingItem(name, description + " Applies immediately; 0% mutes this group.", choices,
++            return new SettingItem(T(name), Sentence(description, "Applies immediately; 0% mutes this group."), choices,
+                 s => Mathf.Clamp(Mathf.RoundToInt(get(s.audio.volume) * 20), 0, 40),
+                 (s, i) => set(s.audio.volume, i / 20f));
+         }
+ 
+-        const string ApplyOnExit = " Applies when leaving settings.";
+-
+         static SettingItem Number(string label, string description, int defaultValue, int min, int max, int step, string unit,
+             Func<AudioOptions, int> get, Action<AudioOptions, int> set, string zeroLabel = null)
+-            => SettingItem.Number(label, description + ApplyOnExit, defaultValue, step, unit,
++            => SettingItem.Number(T(label), ApplyOnExit(description), defaultValue, step, unit,
+                 s => Math.Clamp(get(s.audio), min, max), (s, v) => set(s.audio, Math.Clamp(v, min, max)), min, max,
+                 v => v == 0 && zeroLabel != null ? zeroLabel : (v + " " + unit).TrimEnd());
+ 
+         // Store seconds as before; edit in 0.1 ms increments.
+         static SettingItem Milliseconds(string label, string description, int defaultValue, int min, int max,
+             Func<AudioOptions, float> get, Action<AudioOptions, float> set)
+-            => SettingItem.Number(label, description + ApplyOnExit, defaultValue, 1, "ms",
++            => SettingItem.Number(T(label), ApplyOnExit(description), defaultValue, 1, "ms",
+                 s => Math.Clamp(Mathf.RoundToInt(get(s.audio) * 10000), min, max),
+                 (s, v) => set(s.audio, Math.Clamp(v, min, max) / 10000f), min, max,
+-                v => v == 0 ? "System Default" : (v / 10m).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " ms");
++                v => v == 0 ? T("System Default") : (v / 10m).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " ms");
+ 
+         static SettingItem Toggle(string label, string description, Func<AudioOptions, bool> get, Action<AudioOptions, bool> set)
+-            => SettingItem.Toggle(label, description + ApplyOnExit, s => get(s.audio), (s, v) => set(s.audio, v));
++            => SettingItem.Toggle(T(label), ApplyOnExit(description), s => get(s.audio), (s, v) => set(s.audio, v));
+ 
+         public static IReadOnlyList<SettingItem> Catalog(SoundPlatform platform, AudioBackend backend = AudioBackend.Automatic)
++            => Catalog(platform, backend, UiText.Language);
++
++        // The settings language is fixed while the rows are built: the menu keeps English keys and
++        // rebuilds the Sound page when the language changes.
++        public static IReadOnlyList<SettingItem> Catalog(SoundPlatform platform, AudioBackend backend, string language)
++        {
++            string previous = building;
++            building = language;
++            try { return Build(platform, backend); }
++            finally { building = previous; }
++        }
++
++        static IReadOnlyList<SettingItem> Build(SoundPlatform platform, AudioBackend backend)
+         {
+             var backends = platform == SoundPlatform.Windows
+                 // The cross-platform BassSimple output comes last.
+@@ -79,7 +103,7 @@ public static IReadOnlyList<SettingItem> Catalog(SoundPlatform platform, AudioBa
+                 Volume("Drum Volume", "Don and ka during gameplay and drum-sound previews.", v => v.drum, (v, n) => v.drum = n),
+                 Volume("Effects Volume", "Menu feedback, balloon pops and result effects.", v => v.effects, (v, n) => v.effects = n),
+                 Volume("Voice Volume", "Entry, song selection, combo and result voices.", v => v.voice, (v, n) => v.voice = n),
+-                new SettingItem("Output Backend", "Automatic: WASAPI on Windows, BassSimple elsewhere. ASIO requires a driver. Confirm to show backend settings; changes apply on exit.",
++                new SettingItem(T("Output Backend"), T("Automatic: WASAPI on Windows, BassSimple elsewhere. ASIO requires a driver. Confirm to show backend settings; changes apply on exit."),
+                 Array.ConvertAll(backends, b => b.ToString()),
+                 s => Math.Max(0, Array.IndexOf(backends, s.audio.backend)), (s,i) => s.audio.backend = backends[i]),
+             };
+@@ -87,13 +111,13 @@ public static IReadOnlyList<SettingItem> Catalog(SoundPlatform platform, AudioBa
+                 ? (platform == SoundPlatform.Windows ? AudioBackend.BassWASAPI : AudioBackend.BassSimple) : backend;
+             if (selected == AudioBackend.BassSimple)
+             {
+-                items.Add(Number("Audio Output Period", "Shorter periods reduce delay but may crackle. "
+-                    + (platform == SoundPlatform.Windows ? "Windows controls the actual period and ignores this request." : "The device may choose a different period."),
++                items.Add(Number("Audio Output Period", Sentence("Shorter periods reduce delay but may crackle.",
++                    platform == SoundPlatform.Windows ? "Windows controls the actual period and ignores this request." : "The device may choose a different period."),
+                     0, 0, 100, 1, "ms", a => a.devicePeriodMs, (a, v) => a.devicePeriodMs = v,
+-                    $"Default ({new AudioOptions().Period(platform)} ms)"));
+-                items.Add(Number("Device Buffer", "0 = default; other values are raised to at least twice the output period. "
+-                    + (platform == SoundPlatform.IOS || platform == SoundPlatform.Desktop ? "macOS and iOS ignore this request." : "The system may choose a different buffer."),
+-                    0, 0, 1000, 1, "ms", a => a.deviceBufferMs, (a, v) => a.deviceBufferMs = v, "Default"));
++                    T("Default") + " (" + new AudioOptions().Period(platform) + " ms)"));
++                items.Add(Number("Device Buffer", Sentence("0 = default; other values are raised to at least twice the output period.",
++                    platform == SoundPlatform.IOS || platform == SoundPlatform.Desktop ? "macOS and iOS ignore this request." : "The system may choose a different buffer."),
++                    0, 0, 1000, 1, "ms", a => a.deviceBufferMs, (a, v) => a.deviceBufferMs = v, T("Default")));
+                 if (platform == SoundPlatform.Android)
+                     items.Add(Toggle("Android AAudio", "Use AAudio output when available.", a => a.androidAAudio, (a, v) => a.androidAAudio = v));
+             }
+@@ -112,11 +136,11 @@ public static IReadOnlyList<SettingItem> Catalog(SoundPlatform platform, AudioBa
+                 items.Add(Number("ASIO Device Index", "Driver index, starting at 0. Requires an installed ASIO driver.",
+                     0, 0, int.MaxValue, 1, "", a => a.asioDevice, (a, v) => a.asioDevice = v));
+                 items.Add(Number("ASIO Buffer", "Buffer length in samples; 0 = driver default. Driver-supported sizes only.",
+-                    0, 0, 65536, 1, "samples", a => a.asioBufferSamples, (a, v) => a.asioBufferSamples = v, "Driver Default"));
++                    0, 0, 65536, 1, "samples", a => a.asioBufferSamples, (a, v) => a.asioBufferSamples = v, T("Driver Default")));
+             }
+-            items.Add(Number("Sample Rate", selected == AudioBackend.BassWASAPI
++            items.Add(Number("Sample Rate", T(selected == AudioBackend.BassWASAPI
+                 ? "BASS initialization rate. WASAPI output uses the device's negotiated format."
+-                : "Requested sample rate. The output device may use a different rate.",
++                : "Requested sample rate. The output device may use a different rate."),
+                 44100, 8000, 192000, 100, "Hz", a => a.Rate, (a, v) => a.sampleRate = v));
+             items.Add(Number("BASS Stream Update Period", "Stream buffering is disabled during playback; this does not control the output-device period.",
+                 100, 5, 100, 1, "ms", a => a.updatePeriodMs, (a, v) => a.updatePeriodMs = v));
+diff --git a/Assets/OurTaiko/Runtime/Core/GamePaths.cs b/Assets/OurTaiko/Runtime/Core/GamePaths.cs
+index 5e944d0..d94ce16 100644
+--- a/Assets/OurTaiko/Runtime/Core/GamePaths.cs
++++ b/Assets/OurTaiko/Runtime/Core/GamePaths.cs
+@@ -4,30 +4,68 @@
+ 
+ namespace OurTaiko
+ {
+-    // Where songs, settings, scores and caches live (MajdataPlay MajEnv.RootPath). Desktop players
+-    // keep them with the game: beside the executable on Windows and Linux, inside the .app on
+-    // macOS. iOS uses Documents, which Info.plist shares as On My iPad/iPhone; Android and the
++    // Where songs, settings, scores and caches live (MajdataPlay MajEnv.RootPath). Windows and
++    // Linux keep them beside the executable. macOS standalone uses Application Support, outside
++    // the .app. iOS uses Documents, which Info.plist shares as On My iPad/iPhone; Android and the
+     // Editor use persistentDataPath.
+     public static class GamePaths
+     {
++        public const string MacCompany = "OurTaiko", MacProduct = "OurTaikoPlay";
+         static string root;
+         // First read on the main thread: it asks Unity for the paths.
+         public static string Root => root ??= Resolve();
++        public static string SongsDirectory(string dataRoot) => Path.Combine(dataRoot, "Songs");
+ 
+         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+         static void ResetStatics() => root = null;
+ 
+         static string Resolve()
+         {
+-#if UNITY_STANDALONE && !UNITY_EDITOR
+-            // dataPath is <name>_Data beside the executable, or <name>.app/Contents on macOS.
+-            string beside = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+-            if (Writable(beside)) return beside;
+-            Debug.LogWarning("The game folder is read-only; saving to " + Application.persistentDataPath);
++            bool editor = Application.isEditor;
++            bool standalone = !Application.isMobilePlatform && !editor
++                || Application.platform == RuntimePlatform.WindowsPlayer
++                || Application.platform == RuntimePlatform.LinuxPlayer
++                || Application.platform == RuntimePlatform.OSXPlayer;
++#if UNITY_STANDALONE
++            standalone = true;
+ #endif
+-            return Application.persistentDataPath;
++#if UNITY_EDITOR
++            editor = true;
++#endif
++            bool osx = Application.platform == RuntimePlatform.OSXPlayer;
++            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
++            string chosen = ChooseRoot(editor, standalone, osx, Application.dataPath, Application.persistentDataPath, home, Writable);
++            if (!editor && standalone && !osx)
++            {
++                string beside = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
++                if (!Writable(beside))
++                    Debug.LogWarning("The game folder is read-only; saving to " + Application.persistentDataPath);
++            }
++            if (!editor && osx)
++            {
++                string legacy = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
++                MacPlayerData.CopyMissing(legacy, chosen);
++            }
++            return chosen;
+         }
+ 
++        // editor: Unity Editor. standalone: Windows, Linux, or macOS player. osx: macOS player only.
++        internal static string ChooseRoot(bool editor, bool standalone, bool osx, string dataPath, string persistentPath,
++            string home, Func<string, bool> writable)
++        {
++            if (!editor && standalone && osx) return MacStandaloneRoot(home);
++            if (!editor && standalone)
++            {
++                string beside = Path.GetFullPath(Path.Combine(dataPath, ".."));
++                if (writable(beside)) return beside;
++                return persistentPath;
++            }
++            return persistentPath;
++        }
++
++        internal static string MacStandaloneRoot(string home) => Path.GetFullPath(Path.Combine(
++            home, "Library", "Application Support", MacCompany, MacProduct));
++
+         // A translocated macOS app or an install under Program Files cannot be written.
+         static bool Writable(string directory)
+         {
+diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+index 165675d..8bcf0ae 100644
+--- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
++++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+@@ -27,6 +27,8 @@ public static GameSettings FromJson(string json)
+             settings.general.keyboard.Normalize();
+             settings.play ??= new PlaySettings();
+             settings.display ??= new DisplaySettings();
++            settings.display.flyingNoteDraw = settings.display.FlyingNoteDraw;
++            settings.display.flyingAmount = settings.display.FlyingAmount;
+             settings.audio ??= new AudioOptions();
+             settings.audio.volume ??= new SoundVolumes();
+             settings.audio.backend = settings.audio.Backend;
+@@ -91,6 +93,16 @@ public sealed class DisplaySettings
+         public const int MovieLaneOpacityDefault = 40, MovieLaneOpacityStep = 5;
+         public int movieLaneOpacity = MovieLaneOpacityDefault;
+         public float MovieLaneAlpha => Mathf.Clamp(movieLaneOpacity, 0, 100) / 100f;
++        // 0: today's interface images. 1: sprites. Anything else is treated as 0.
++        public const int FlyingCurrent = 0, FlyingSprite = 1;
++        public int flyingNoteDraw = FlyingCurrent;
++        public int FlyingNoteDraw => flyingNoteDraw == FlyingSprite ? FlyingSprite : FlyingCurrent;
++        // 0: every hit flies. 1: normal notes fly, drumroll hits do not. 2: nothing flies.
++        public const int FlyingHigh = 0, FlyingMedium = 1, FlyingLow = 2;
++        public int flyingAmount = FlyingHigh;
++        public int FlyingAmount => flyingAmount == FlyingMedium || flyingAmount == FlyingLow ? flyingAmount : FlyingHigh;
++        public bool Flies(bool drumrollHit) =>
++            FlyingAmount == FlyingHigh || FlyingAmount == FlyingMedium && !drumrollHit;
+ 
+         // Applies these settings to the running player; render every frame (no frame skipping).
+         public void Apply()
+diff --git a/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs
+new file mode 100644
+index 0000000..09b54d9
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs
+@@ -0,0 +1,55 @@
++using System;
++using System.IO;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // Copies player files out of a macOS .app bundle root. The bundle root also holds Contents
++    // and the executable, so only the named entries move, and nothing is deleted.
++    public static class MacPlayerData
++    {
++        public static readonly string[] Files = {
++            "settings.json", "options.json", "player.json", "servers.json", "scores.sqlite3",
++        };
++        public static readonly string[] Folders = { "Songs", "cache" };
++
++        public static void CopyMissing(string sourceRoot, string destinationRoot)
++        {
++            try
++            {
++                if (string.IsNullOrEmpty(sourceRoot) || string.IsNullOrEmpty(destinationRoot)) return;
++                sourceRoot = Path.GetFullPath(sourceRoot);
++                destinationRoot = Path.GetFullPath(destinationRoot);
++                if (string.Equals(sourceRoot, destinationRoot, StringComparison.Ordinal)) return;
++                Directory.CreateDirectory(destinationRoot);
++                foreach (string folder in Folders) CopyFolder(Path.Combine(sourceRoot, folder), Path.Combine(destinationRoot, folder));
++                foreach (string file in Files) CopyFile(Path.Combine(sourceRoot, file), Path.Combine(destinationRoot, file));
++            }
++            catch (Exception error) { Debug.LogWarning("Could not copy player data: " + error.Message); }
++        }
++
++        static void CopyFile(string source, string destination)
++        {
++            if (!File.Exists(source)) return;
++            if (File.Exists(destination) && new FileInfo(destination).Length > 0) return;
++            Directory.CreateDirectory(Path.GetDirectoryName(destination));
++            File.Copy(source, destination, true);
++        }
++
++        // An empty Songs directory still counts as missing, so a later launch can fill it.
++        static void CopyFolder(string source, string destination)
++        {
++            if (!Directory.Exists(source)) return;
++            if (Directory.Exists(destination) && Directory.GetFileSystemEntries(destination).Length > 0) return;
++            Directory.CreateDirectory(destination);
++            foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
++            {
++                string relative = Path.GetRelativePath(source, file);
++                string target = Path.Combine(destination, relative);
++                Directory.CreateDirectory(Path.GetDirectoryName(target));
++                if (File.Exists(target) && new FileInfo(target).Length > 0) continue;
++                File.Copy(file, target, true);
++            }
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta
+new file mode 100644
+index 0000000..79a53e5
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 1193abf3f0f84c3188de6e6e679e3496
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Runtime/Core/SettingsMenu.cs b/Assets/OurTaiko/Runtime/Core/SettingsMenu.cs
+index 9e15963..d85bed7 100644
+--- a/Assets/OurTaiko/Runtime/Core/SettingsMenu.cs
++++ b/Assets/OurTaiko/Runtime/Core/SettingsMenu.cs
+@@ -53,8 +53,9 @@ public string Format(GameSettings settings) => BindingKey.HasValue ? settings.ge
+         public string GetText(GameSettings settings) => getText(settings) ?? "";
+         public void SetText(GameSettings settings, string text) => setText(settings, text ?? "");
+ 
+-        public string NumberHint => $"Default: {Format(DefaultValue)} / Step: {StepDisplay}"
+-            + (formatNumber == null ? " / Ka: adjust / Don or tap: save" : "");
++        public string NumberHint => UiText.Settings("Default") + ": " + Format(DefaultValue) + " / "
++            + UiText.Settings("Step") + ": " + StepDisplay
++            + (formatNumber == null ? " / " + UiText.Settings("Ka: adjust / Don or tap: save") : "");
+         public string StepDisplay => formatNumber?.Invoke(Step) ?? $"{Step} {Unit}";
+         public int Get(GameSettings settings) => get(settings);
+         public void Set(GameSettings settings, int choice) => set(settings, choice);
+@@ -129,7 +130,7 @@ public enum Result { None, Moved, Entered, Returned, Changed, Exit, Action }
+         public bool CapturingKey { get; private set; }
+         public bool EditingText => Focus == SettingsFocus.Choice && CurrentItem?.IsText == true;
+         public IReadOnlyList<string> Choices => CurrentItem?.BindingKey is InputKey key
+-            ? new[] { "Add Key", "Clear All", "Defaults" }.Concat(Settings.general.keyboard.Get(key).Select(k => "Remove " + k)).ToArray()
++            ? new[] { "Add Key", "Clear All", "Defaults" }.Concat(Settings.general.keyboard.Get(key).Select(k => UiText.Settings("Remove") + " " + k)).ToArray()
+             : CurrentItem?.Choices ?? Array.Empty<string>();
+ 
+         public Result CaptureKey(Key key)
+@@ -203,7 +204,7 @@ public static IReadOnlyList<SettingType> Catalog() => new[]
+             new SettingType("General", new[]
+             {
+                 new SettingItem("Language",
+-                    "Choose the language for song titles and subtitles. Missing translations use Japanese, then the base title. Menus and skin artwork are unchanged.",
++                    "Choose the language for song titles, subtitles, and written text. Song titles use the chart's own translation. Outside Settings, English and Korean show Japanese.",
+                     GeneralSettings.LanguageNames,
+                     s => Array.IndexOf(GeneralSettings.Languages, s.general.Language),
+                     (s, choice) => s.general.language = GeneralSettings.Languages[choice]),
+@@ -245,6 +246,16 @@ public static IReadOnlyList<SettingType> Catalog() => new[]
+                     DisplaySettings.MovieLaneOpacityDefault, DisplaySettings.MovieLaneOpacityStep, "%",
+                     s => s.display.movieLaneOpacity, (s, value) => s.display.movieLaneOpacity = value,
+                     0, 100, value => value + " %"),
++                new SettingItem("Flying Notes",
++                    "Images draws each flying note as an interface image. Sprites uses the same drawing as the notes on the lane, still one note for every hit.",
++                    new[] { "Images", "Sprite" },
++                    s => s.display.FlyingNoteDraw,
++                    (s, choice) => s.display.flyingNoteDraw = choice),
++                new SettingItem("Flying Amount",
++                    "High: every hit flies. Medium: normal notes fly, drumroll hits do not. Low: nothing flies.",
++                    new[] { "High", "Medium", "Low" },
++                    s => s.display.FlyingAmount,
++                    (s, choice) => s.display.flyingAmount = choice),
+             }),
+             new SettingType("Sound", s => SoundSettings.Catalog(SoundSettings.Platform, s.audio.Backend)),
+             new SettingType("OurTaiko Accounts", AccountItems(0).Concat(AccountItems(1)).Concat(new[]
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
+new file mode 100644
+index 0000000..c585b54
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
+@@ -0,0 +1,346 @@
++using System.Collections.Generic;
++
++namespace OurTaiko
++{
++    // Player-facing sentences, keyed by the text already in the code. Settings uses every
++    // language. Screens outside Settings use Japanese, Simplified, and Traditional only.
++    public static class UiText
++    {
++        // ja, zh, zh_tw, ko. English is the key, except for sentences that were already Chinese or Japanese.
++        static readonly Dictionary<string, string[]> Table = new Dictionary<string, string[]>
++        {
++            ["General"] = Row("全般", "常规", "一般", "일반"),
++            ["Play"] = Row("演奏", "游玩", "遊玩", "플레이"),
++            ["Display"] = Row("表示", "显示", "顯示", "화면"),
++            ["Sound"] = Row("サウンド", "声音", "聲音", "소리"),
++            ["OurTaiko Accounts"] = Row("アカウント", "账号", "帳號", "계정"),
++            ["Return"] = Row("もどる", "返回", "返回", "돌아가기"),
++            ["Language"] = Row("言語", "语言", "語言", "언어"),
++            ["Choose the language for song titles, subtitles, and written text. Song titles use the chart's own translation. Outside Settings, English and Korean show Japanese."] =
++                Row("曲名、サブタイトル、画面の文字に使う言語です。曲名は譜面自身の訳を使います。設定以外では、英語と韓国語は日本語で表示します。",
++                    "用于歌名、副标题和界面文字。歌名仍用谱面自己的译文。设置以外的画面，选英文或韩文时显示日文。",
++                    "用於歌名、副標題和介面文字。歌名仍用譜面自己的譯文。設定以外的畫面，選英文或韓文時顯示日文。",
++                    "곡명, 부제, 화면 글자에 쓰는 언어입니다. 곡명은 채보의 번역을 사용합니다. 설정 밖에서는 영어와 한국어가 일본어로 표시됩니다."),
++            ["Enable Drumpad for Single Player Mode"] = Row("1人プレイのドラムパッド", "单人模式显示鼓面", "單人模式顯示鼓面", "1인 플레이 드럼 패드"),
++            ["Show the touch drum in single player mode and let touches and clicks hit it."] =
++                Row("1人プレイでタッチドラムを表示し、タップとクリックで叩けるようにします。",
++                    "在单人模式显示触摸鼓面，点击和触控可以敲击。",
++                    "在單人模式顯示觸控鼓面，點擊和觸控可以敲擊。",
++                    "1인 플레이에서 터치 드럼을 표시하고, 탭과 클릭으로 칠 수 있게 합니다."),
++            ["Offset A (Audio)"] = Row("オフセット A（音声）", "偏移 A（音频）", "偏移 A（音訊）", "오프셋 A (오디오)"),
++            ["Move the chart relative to music. Negative: earlier; positive: later."] =
++                Row("譜面を音楽に対して動かします。負: 早く、正: 遅く。", "相对音乐移动谱面。负值更早，正值更晚。", "相對音樂移動譜面。負值更早，正值更晚。", "음악을 기준으로 채보를 옮깁니다. 음수면 빠르고, 양수면 늦습니다."),
++            ["Offset B (Judgment)"] = Row("オフセット B（判定）", "偏移 B（判定）", "偏移 B（判定）", "오프셋 B (판정)"),
++            ["Move the judgment window only. Negative: earlier; positive: later."] =
++                Row("判定だけを動かします。負: 早く、正: 遅く。", "只移动判定窗口。负值更早，正值更晚。", "只移動判定視窗。負值更早，正值更晚。", "판정만 옮깁니다. 음수면 빠르고, 양수면 늦습니다."),
++            ["Input Delay"] = Row("入力遅延", "输入延迟", "輸入延遲", "입력 지연"),
++            ["Delay drum hits before judgment, sound and effects, like the arcade. 0: off."] =
++                Row("叩いてから判定・音・演出まで待つ時間です。0 でオフ。", "敲击后，判定、音效和演出等待的时间。0 为关闭。", "敲擊後，判定、音效和演出等待的時間。0 為關閉。", "친 뒤 판정, 소리, 연출까지 기다리는 시간입니다. 0이면 꺼짐."),
++            ["Target Frame Rate"] = Row("目標フレームレート", "目标帧率", "目標幀率", "목표 프레임"),
++            ["The highest frame rate the game renders at. Unlimited renders as fast as the device can."] =
++                Row("描画する最高フレームレートです。無制限は端末の限界まで描画します。", "游戏渲染的最高帧率。不限制则尽快渲染。", "遊戲渲染的最高幀率。不限制則盡快渲染。", "게임이 그리는 최대 프레임입니다. 무제한은 기기가 할 수 있는 만큼 그립니다."),
++            ["Unlimited"] = Row("無制限", "不限制", "不限制", "무제한"),
++            ["VSync"] = Row("垂直同期", "垂直同步", "垂直同步", "수직 동기화"),
++            ["Wait for the display's refresh before each frame to prevent tearing. While enabled, the refresh rate replaces Target Frame Rate."] =
++                Row("ティアリングを防ぐため、フレームごとに画面の更新を待ちます。有効中は目標フレームレートの代わりにリフレッシュレートを使います。",
++                    "每帧等待显示器刷新，避免画面撕裂。开启后，刷新率会代替目标帧率。",
++                    "每幀等待顯示器刷新，避免畫面撕裂。開啟後，刷新率會代替目標幀率。",
++                    "찢김을 막기 위해 프레임마다 화면 재생을 기다립니다. 켜면 목표 프레임 대신 주사율을 사용합니다."),
++            ["Background Movie"] = Row("背景動画", "背景影片", "背景影片", "배경 영상"),
++            ["Play the chart's background movie behind the lanes, and download it with online charts."] =
++                Row("譜面の背景動画をレーンの後ろで再生し、オンライン譜面では一緒にダウンロードします。",
++                    "在轨道后方播放谱面的背景影片，在线谱面会一并下载。",
++                    "在軌道後方播放譜面的背景影片，線上譜面會一併下載。",
++                    "채보의 배경 영상을 레인 뒤에서 재생하고, 온라인 채보는 함께 내려받습니다."),
++            ["Lane Opacity with Movie"] = Row("動画中のレーン透明度", "影片时的轨道不透明度", "影片時的軌道不透明度", "영상 중 레인 불투명도"),
++            ["How opaque the lane backgrounds are while a background movie plays. 100: as without a movie."] =
++                Row("背景動画の再生中、レーンの背景をどれだけ不透明にするか。100 で動画なしと同じ。",
++                    "播放背景影片时轨道背景的不透明度。100 表示与没有影片时相同。",
++                    "播放背景影片時軌道背景的不透明度。100 表示與沒有影片時相同。",
++                    "배경 영상이 재생되는 동안 레인 배경의 불투명도입니다. 100이면 영상이 없을 때와 같습니다."),
++            ["Flying Notes"] = Row("飛び出す音符", "飞出音符", "飛出音符", "날아가는 음표"),
++            ["Images draws each flying note as an interface image. Sprites uses the same drawing as the notes on the lane, still one note for every hit."] =
++                Row("「画像」は界面の画像で飛ばします。「スプライト」は譜面の音符と同じ描き方で、ヒットごとに飛ばします。",
++                    "「图片」用界面图片绘制飞出的音符。「精灵」和谱面音符用同一种画法，仍然每击一颗。",
++                    "「圖片」用介面圖片繪製飛出的音符。「精靈」和譜面音符用同一種畫法，仍然每擊一顆。",
++                    "「이미지」는 인터페이스 그림으로 그립니다. 「스프라이트」는 채보 음표와 같은 방식으로, 칠 때마다 한 개씩 날립니다."),
++            ["Images"] = Row("画像", "图片", "圖片", "이미지"),
++            ["Sprite"] = Row("スプライト", "精灵", "精靈", "스프라이트"),
++            ["Flying Amount"] = Row("飛ぶ数", "飞出数量", "飛出數量", "날아가는 수"),
++            ["High: every hit flies. Medium: normal notes fly, drumroll hits do not. Low: nothing flies."] =
++                Row("高：ヒットごとに飛ぶ。中：普通の音符だけ飛び、連打は飛ばない。低：飛ばない。",
++                    "高：每击都飞。中：普通音符飞，连打不飞。低：不飞。",
++                    "高：每擊都飛。中：普通音符飛，連打不飛。低：不飛。",
++                    "높음: 칠 때마다 날아갑니다. 중간: 일반 음표만 날고 연타는 날지 않습니다. 낮음: 날지 않습니다."),
++            ["High"] = Row("高", "高", "高", "높음"),
++            ["Medium"] = Row("中", "中", "中", "중간"),
++            ["Low"] = Row("低", "低", "低", "낮음"),
++            ["演奏ゲーム"] = Row("演奏ゲーム", "演奏游戏", "演奏遊戲", "연주 게임"),
++            ["練習モード"] = Row("練習モード", "练习模式", "練習模式", "연습 모드"),
++            ["段位道場"] = Row("段位道場", "段位道场", "段位道場", "단위 도장"),
++            ["ゲーム設定"] = Row("ゲーム設定", "游戏设置", "遊戲設定", "게임 설정"),
++            ["Master Volume"] = Row("マスター音量", "主音量", "主音量", "마스터 볼륨"),
++            ["BGM Volume"] = Row("BGM 音量", "BGM 音量", "BGM 音量", "BGM 볼륨"),
++            ["Track Volume"] = Row("楽曲音量", "曲目音量", "曲目音量", "곡 볼륨"),
++            ["Drum Volume"] = Row("太鼓音量", "鼓声音量", "鼓聲音量", "북소리 볼륨"),
++            ["Effects Volume"] = Row("効果音音量", "音效音量", "音效音量", "효과음 볼륨"),
++            ["Voice Volume"] = Row("ボイス音量", "语音音量", "語音音量", "보이스 볼륨"),
++            ["Output Backend"] = Row("出力バックエンド", "输出后端", "輸出後端", "출력 백엔드"),
++            ["Audio Output Period"] = Row("音声出力の周期", "音频输出周期", "音訊輸出週期", "오디오 출력 주기"),
++            ["Device Buffer"] = Row("デバイスバッファー", "设备缓冲", "裝置緩衝", "장치 버퍼"),
++            ["Android AAudio"] = Row("Android AAudio", "Android AAudio", "Android AAudio", "Android AAudio"),
++            ["WASAPI Exclusive"] = Row("WASAPI 排他", "WASAPI 独占", "WASAPI 獨占", "WASAPI 독점"),
++            ["WASAPI Raw Mode"] = Row("WASAPI ローモード", "WASAPI 原始模式", "WASAPI 原始模式", "WASAPI 원시 모드"),
++            ["WASAPI Async Mode"] = Row("WASAPI 非同期", "WASAPI 异步模式", "WASAPI 非同步模式", "WASAPI 비동기 모드"),
++            ["WASAPI Buffer"] = Row("WASAPI バッファー", "WASAPI 缓冲", "WASAPI 緩衝", "WASAPI 버퍼"),
++            ["WASAPI Period"] = Row("WASAPI 周期", "WASAPI 周期", "WASAPI 週期", "WASAPI 주기"),
++            ["ASIO Device Index"] = Row("ASIO デバイス番号", "ASIO 设备序号", "ASIO 裝置序號", "ASIO 장치 번호"),
++            ["ASIO Buffer"] = Row("ASIO バッファー", "ASIO 缓冲", "ASIO 緩衝", "ASIO 버퍼"),
++            ["Sample Rate"] = Row("サンプルレート", "采样率", "取樣率", "샘플 레이트"),
++            ["BASS Stream Update Period"] = Row("BASS ストリーム更新周期", "BASS 流更新周期", "BASS 串流更新週期", "BASS 스트림 갱신 주기"),
++            ["BASS Stream Buffer"] = Row("BASS ストリームバッファー", "BASS 流缓冲", "BASS 串流緩衝", "BASS 스트림 버퍼"),
++            ["Overall volume."] = Row("全体の音量です。", "整体音量。", "整體音量。", "전체 볼륨입니다."),
++            ["Music in menus and the result screen."] =
++                Row("メニューとリザルト画面の音楽です。", "菜单和结算画面的音乐。", "選單和結算畫面的音樂。", "메뉴와 결과 화면의 음악입니다."),
++            ["Song playback and song previews."] =
++                Row("曲の再生と試聴です。", "歌曲播放和试听。", "歌曲播放和試聽。", "곡 재생과 미리 듣기입니다."),
++            ["Don and ka during gameplay and drum-sound previews."] =
++                Row("プレイ中のドン・カッと太鼓音の試聴です。", "游玩中的咚、咔以及鼓声试听。", "遊玩中的咚、咔以及鼓聲試聽。", "플레이 중 동·캇과 북소리 미리 듣기입니다."),
++            ["Menu feedback, balloon pops and result effects."] =
++                Row("メニューの操作音、風船の割れる音、リザルトの効果音です。", "菜单操作音、气球破裂声和结算音效。", "選單操作音、氣球破裂聲和結算音效。", "메뉴 조작음, 풍선 터지는 소리, 결과 효과음입니다."),
++            ["Entry, song selection, combo and result voices."] =
++                Row("エントリー、選曲、コンボ、リザルトのボイスです。", "入口、选曲、连击和结算语音。", "入口、選曲、連擊和結算語音。", "엔트리, 선곡, 콤보, 결과 보이스입니다."),
++            ["Automatic: WASAPI on Windows, BassSimple elsewhere. ASIO requires a driver. Confirm to show backend settings; changes apply on exit."] =
++                Row("自動：Windows では WASAPI、それ以外では BassSimple。ASIO にはドライバーが必要です。決定するとバックエンド設定を表示します。変更は終了時に反映されます。",
++                    "自动：Windows 使用 WASAPI，其他平台使用 BassSimple。ASIO 需要驱动。确认后显示后端设置；改动在退出时生效。",
++                    "自動：Windows 使用 WASAPI，其他平台使用 BassSimple。ASIO 需要驅動。確認後顯示後端設定；改動在退出時生效。",
++                    "자동: Windows에서는 WASAPI, 그 외에는 BassSimple. ASIO는 드라이버가 필요합니다. 확인하면 백엔드 설정이 표시되며, 변경은 종료 시 적용됩니다."),
++            ["Shorter periods reduce delay but may crackle."] =
++                Row("周期を短くすると遅延は減りますが、音が割れることがあります。", "周期越短延迟越低，但可能出现爆音。", "週期越短延遲越低，但可能出現爆音。", "주기를 짧게 하면 지연은 줄지만 소리가 깨질 수 있습니다."),
++            ["Windows controls the actual period and ignores this request."] =
++                Row("Windows は実際の周期を管理するため、この指定は無視されます。", "Windows 控制实际周期，会忽略此设置。", "Windows 控制實際週期，會忽略此設定。", "Windows는 실제 주기를 제어하므로 이 설정을 무시합니다."),
++            ["The device may choose a different period."] =
++                Row("デバイスが別の周期を選ぶことがあります。", "设备可能选择不同的周期。", "裝置可能選擇不同的週期。", "장치가 다른 주기를 선택할 수 있습니다."),
++            ["0 = default; other values are raised to at least twice the output period."] =
++                Row("0 = 既定値。それ以外は出力周期の 2 倍以上に引き上げられます。", "0 = 默认；其他值会被提升到输出周期的至少两倍。", "0 = 預設；其他值會被提升到輸出週期的至少兩倍。", "0 = 기본값. 그 외 값은 출력 주기의 최소 두 배로 올려집니다."),
++            ["macOS and iOS ignore this request."] =
++                Row("macOS と iOS はこの指定を無視します。", "macOS 和 iOS 会忽略此设置。", "macOS 和 iOS 會忽略此設定。", "macOS와 iOS는 이 설정을 무시합니다."),
++            ["The system may choose a different buffer."] =
++                Row("システムが別のバッファーを選ぶことがあります。", "系统可能选择不同的缓冲。", "系統可能選擇不同的緩衝。", "시스템이 다른 버퍼를 선택할 수 있습니다."),
++            ["Use AAudio output when available."] =
++                Row("利用できる場合は AAudio 出力を使います。", "可用时使用 AAudio 输出。", "可用時使用 AAudio 輸出。", "사용 가능하면 AAudio 출력을 사용합니다."),
++            ["Request exclusive access to the output device. Falls back to shared mode if unavailable."] =
++                Row("出力デバイスの排他利用を要求します。使えない場合は共有モードになります。", "请求独占输出设备。不可用时回退到共享模式。", "請求獨占輸出裝置。不可用時退回共享模式。", "출력 장치의 독점 사용을 요청합니다. 사용할 수 없으면 공유 모드로 돌아갑니다."),
++            ["Request output without Windows audio enhancements. Falls back if unsupported."] =
++                Row("Windows の音声拡張を使わずに出力するよう要求します。未対応の場合は元に戻ります。", "请求不使用 Windows 音频增强。不支持时回退。", "請求不使用 Windows 音訊增強。不支援時退回。", "Windows 오디오 향상 없이 출력을 요청합니다. 지원되지 않으면 되돌아갑니다."),
++            ["Prefill audio to reduce dropouts at the cost of extra delay. Used in exclusive mode only."] =
++                Row("音切れを減らすため音声を先読みします。その分だけ遅延します。排他モードでのみ使われます。", "预填充音频以减少断音，代价是额外延迟。仅在独占模式使用。", "預填音訊以減少斷音，代價是額外延遲。僅在獨占模式使用。", "끊김을 줄이려고 오디오를 미리 채웁니다. 대신 지연이 늘어납니다. 독점 모드에서만 사용됩니다."),
++            ["Buffer per block in exclusive mode (two blocks). Shared mode uses its own buffer."] =
++                Row("排他モードの 1 ブロックあたりのバッファーです（2 ブロック）。共有モードは独自のバッファーを使います。", "独占模式下每个块的缓冲（两块）。共享模式使用自己的缓冲。", "獨占模式下每個區塊的緩衝（兩塊）。共享模式使用自己的緩衝。", "독점 모드에서 블록당 버퍼입니다(두 블록). 공유 모드는 자체 버퍼를 사용합니다."),
++            ["Shared-mode period; 0 = system default. Ignored in exclusive mode."] =
++                Row("共有モードの周期です。0 = システム既定値。排他モードでは無視されます。", "共享模式周期；0 = 系统默认。独占模式下忽略。", "共享模式週期；0 = 系統預設。獨占模式下忽略。", "공유 모드 주기입니다. 0 = 시스템 기본값. 독점 모드에서는 무시됩니다."),
++            ["Driver index, starting at 0. Requires an installed ASIO driver."] =
++                Row("ドライバーの番号です（0 から）。ASIO ドライバーのインストールが必要です。", "驱动序号，从 0 开始。需要已安装 ASIO 驱动。", "驅動序號，從 0 開始。需要已安裝 ASIO 驅動。", "드라이버 번호이며 0부터 시작합니다. ASIO 드라이버가 설치되어 있어야 합니다."),
++            ["Buffer length in samples; 0 = driver default. Driver-supported sizes only."] =
++                Row("バッファー長（サンプル数）です。0 = ドライバーの既定値。ドライバーが対応するサイズのみ使えます。", "缓冲长度（采样数）；0 = 驱动默认。仅支持驱动允许的大小。", "緩衝長度（取樣數）；0 = 驅動預設。僅支援驅動允許的大小。", "버퍼 길이(샘플 수)입니다. 0 = 드라이버 기본값. 드라이버가 지원하는 크기만 사용할 수 있습니다."),
++            ["BASS initialization rate. WASAPI output uses the device's negotiated format."] =
++                Row("BASS の初期化レートです。WASAPI 出力はデバイスと交渉した形式を使います。", "BASS 初始化采样率。WASAPI 输出使用设备协商的格式。", "BASS 初始化取樣率。WASAPI 輸出使用裝置協商的格式。", "BASS 초기화 레이트입니다. WASAPI 출력은 장치와 협상한 형식을 사용합니다."),
++            ["Requested sample rate. The output device may use a different rate."] =
++                Row("要求するサンプルレートです。出力デバイスが別のレートを使うことがあります。", "请求的采样率。输出设备可能使用不同采样率。", "請求的取樣率。輸出裝置可能使用不同取樣率。", "요청할 샘플 레이트입니다. 출력 장치가 다른 레이트를 사용할 수 있습니다."),
++            ["Stream buffering is disabled during playback; this does not control the output-device period."] =
++                Row("再生中はストリームのバッファリングを無効にしています。これは出力デバイスの周期を制御するものではありません。", "播放期间不使用流缓冲；此项不控制输出设备周期。", "播放期間不使用串流緩衝；此項不控制輸出裝置週期。", "재생 중에는 스트림 버퍼링을 사용하지 않습니다. 이 항목은 출력 장치 주기를 제어하지 않습니다."),
++            ["At least 1 ms above the stream update period. Playback streams disable this buffer."] =
++                Row("ストリーム更新周期より最低 1 ms 大きくします。再生ストリームではこのバッファーを使いません。", "至少比流更新周期大 1 ms。播放流不启用此缓冲。", "至少比串流更新週期大 1 ms。播放串流不啟用此緩衝。", "스트림 갱신 주기보다 최소 1 ms 큽니다. 재생 스트림은 이 버퍼를 사용하지 않습니다."),
++            ["Applies when leaving settings."] =
++                Row("設定を出るときに反映されます。", "离开设置时生效。", "離開設定時生效。", "설정을 나갈 때 적용됩니다."),
++            ["Applies immediately; 0% mutes this group."] =
++                Row("すぐに反映されます。0% でこのグループを消音します。", "立即生效；0% 静音该组。", "立即生效；0% 靜音該組。", "즉시 적용됩니다. 0%이면 이 그룹이 음소거됩니다."),
++            ["Automatic"] = Row("自動", "自动", "自動", "자동"),
++            ["System Default"] = Row("システム既定値", "系统默认", "系統預設", "시스템 기본값"),
++            ["Driver Default"] = Row("ドライバー既定値", "驱动默认", "驅動預設", "드라이버 기본값"),
++            ["1P Username"] = Row("1P ユーザー名", "1P 用户名", "1P 用戶名", "1P 사용자 이름"),
++            ["1P's OurTaiko account (sso.ourtaiko.org). Enter the password below to sign in."] =
++                Row("1P の OurTaiko アカウントです（sso.ourtaiko.org）。下のパスワードを入力するとサインインします。",
++                    "1P 的 OurTaiko 账号（sso.ourtaiko.org）。在下方输入密码即可登录。",
++                    "1P 的 OurTaiko 帳號（sso.ourtaiko.org）。在下方輸入密碼即可登入。",
++                    "1P의 OurTaiko 계정입니다(sso.ourtaiko.org). 아래에 비밀번호를 입력하면 로그인합니다."),
++            ["2P Username"] = Row("2P ユーザー名", "2P 用户名", "2P 用戶名", "2P 사용자 이름"),
++            ["2P's OurTaiko account (sso.ourtaiko.org). Enter the password below to sign in."] =
++                Row("2P の OurTaiko アカウントです（sso.ourtaiko.org）。下のパスワードを入力するとサインインします。",
++                    "2P 的 OurTaiko 账号（sso.ourtaiko.org）。在下方输入密码即可登录。",
++                    "2P 的 OurTaiko 帳號（sso.ourtaiko.org）。在下方輸入密碼即可登入。",
++                    "2P의 OurTaiko 계정입니다(sso.ourtaiko.org). 아래에 비밀번호를 입력하면 로그인합니다."),
++            ["1P Password"] = Row("1P パスワード", "1P 密码", "1P 密碼", "1P 비밀번호"),
++            ["2P Password"] = Row("2P パスワード", "2P 密码", "2P 密碼", "2P 비밀번호"),
++            ["Signs in as soon as it is entered. The password is not saved; the sign-in lasts while 1P plays at least once every 30 days."] =
++                Row("入力するとすぐにサインインします。パスワードは保存されません。30 日に一度以上 1P でプレイしている間はサインインが続きます。",
++                    "输入后立即登录。密码不会保存；只要 1P 每 30 天至少游玩一次，登录状态就会保持。",
++                    "輸入後立即登入。密碼不會儲存；只要 1P 每 30 天至少遊玩一次，登入狀態就會保持。",
++                    "입력하면 바로 로그인합니다. 비밀번호는 저장되지 않으며, 1P가 30일에 한 번 이상 플레이하는 동안 로그인이 유지됩니다."),
++            ["Signs in as soon as it is entered. The password is not saved; the sign-in lasts while 2P plays at least once every 30 days."] =
++                Row("入力するとすぐにサインインします。パスワードは保存されません。30 日に一度以上 2P でプレイしている間はサインインが続きます。",
++                    "输入后立即登录。密码不会保存；只要 2P 每 30 天至少游玩一次，登录状态就会保持。",
++                    "輸入後立即登入。密碼不會儲存；只要 2P 每 30 天至少遊玩一次，登入狀態就會保持。",
++                    "입력하면 바로 로그인합니다. 비밀번호는 저장되지 않으며, 2P가 30일에 한 번 이상 플레이하는 동안 로그인이 유지됩니다."),
++            ["1P Sign Out"] = Row("1P サインアウト", "1P 退出登录", "1P 登出", "1P 로그아웃"),
++            ["2P Sign Out"] = Row("2P サインアウト", "2P 退出登录", "2P 登出", "2P 로그아웃"),
++            ["Sign 1P out of its OurTaiko account on this device."] =
++                Row("この端末で 1P の OurTaiko アカウントからサインアウトします。",
++                    "在这台设备上退出 1P 的 OurTaiko 账号。",
++                    "在這台裝置上登出 1P 的 OurTaiko 帳號。",
++                    "이 기기에서 1P의 OurTaiko 계정에서 로그아웃합니다."),
++            ["Sign 2P out of its OurTaiko account on this device."] =
++                Row("この端末で 2P の OurTaiko アカウントからサインアウトします。",
++                    "在这台设备上退出 2P 的 OurTaiko 账号。",
++                    "在這台裝置上登出 2P 的 OurTaiko 帳號。",
++                    "이 기기에서 2P의 OurTaiko 계정에서 로그아웃합니다."),
++            ["Type to sign in"] = Row("入力でサインイン", "输入即登录", "輸入即登入", "입력하면 로그인"),
++            ["Not signed in"] = Row("未サインイン", "未登录", "未登入", "로그인 안 됨"),
++            ["Signed in"] = Row("サインイン済み", "已登录", "已登入", "로그인됨"),
++            ["Bound"] = Row("割り当て", "已绑定", "已綁定", "지정됨"),
++            ["Default"] = Row("初期値", "默认", "預設", "기본값"),
++            ["Step"] = Row("刻み", "步长", "步長", "간격"),
++            ["Ka: adjust / Don or tap: save"] = Row("カッ：調整 / ドンまたはタップ：保存", "咔：调整 / 咚或点击：保存", "咔：調整 / 咚或點擊：儲存", "캇: 조절 / 동 또는 탭: 저장"),
++            ["Refresh Song List"] = Row("曲リストを更新", "刷新曲目列表", "重新整理曲目列表", "곡 목록 새로고침"),
++            ["Load the built-in servers' song lists again."] = Row("内蔵サーバーの曲リストを読み込み直します。", "重新加载内置服务器的曲目列表。", "重新載入內建伺服器的曲目列表。", "내장 서버의 곡 목록을 다시 불러옵니다."),
++            ["Refresh Login Status"] = Row("ログイン状態を更新", "刷新登录状态", "重新整理登入狀態", "로그인 상태 새로고침"),
++            ["Sign in to the built-in servers again with the account above."] = Row("上のアカウントで内蔵サーバーに再度サインインします。", "用上面的账号重新登录内置服务器。", "用上面的帳號重新登入內建伺服器。", "위 계정으로 내장 서버에 다시 로그인합니다."),
++            ["Enabled"] = Row("有効", "开启", "開啟", "켜짐"),
++            ["Disabled"] = Row("無効", "关闭", "關閉", "꺼짐"),
++            ["Not set"] = Row("未設定", "未设置", "未設定", "설정 안 됨"),
++            ["Add Key"] = Row("キーを追加", "添加按键", "新增按鍵", "키 추가"),
++            ["Clear All"] = Row("すべて解除", "全部清除", "全部清除", "모두 지우기"),
++            ["Defaults"] = Row("初期値", "默认", "預設", "기본값"),
++            ["Unbound"] = Row("未割り当て", "未绑定", "未綁定", "지정 안 됨"),
++            ["Keyboard: 1P Left Don"] = Row("キーボード: 1P 左ドン", "键盘：1P 左咚", "鍵盤：1P 左咚", "키보드: 1P 왼쪽 동"),
++            ["Keyboard: 1P Right Don"] = Row("キーボード: 1P 右ドン", "键盘：1P 右咚", "鍵盤：1P 右咚", "키보드: 1P 오른쪽 동"),
++            ["Keyboard: 1P Left Ka"] = Row("キーボード: 1P 左カッ", "键盘：1P 左咔", "鍵盤：1P 左咔", "키보드: 1P 왼쪽 캇"),
++            ["Keyboard: 1P Right Ka"] = Row("キーボード: 1P 右カッ", "键盘：1P 右咔", "鍵盤：1P 右咔", "키보드: 1P 오른쪽 캇"),
++            ["Keys move from their old action. Mouse/touch works even when unbound."] =
++                Row("キーは元の操作から移ります。未割り当てでもマウスとタッチは使えます。", "按键会从原来的操作挪走。未绑定时鼠标和触控仍可用。", "按鍵會從原來的操作挪走。未綁定時滑鼠和觸控仍可用。", "키는 원래 동작에서 옮겨집니다. 지정하지 않아도 마우스와 터치는 동작합니다."),
++            ["Resume"] = Row("再開", "继续", "繼續", "계속"),
++            ["Restart"] = Row("はじめから", "重开", "重開", "다시 시작"),
++            ["Back to Song Select"] = Row("曲選択にもどる", "返回选曲", "返回選曲", "곡 선택으로"),
++            ["PAUSED"] = Row("一時停止", "已暂停", "已暫停", "일시정지"),
++            ["CHART COULD NOT LOAD"] = Row("譜面を読み込めませんでした", "谱面无法加载", "譜面無法載入", "채보를 불러올 수 없습니다"),
++            ["谱面分支"] = Row("譜面分岐", "谱面分支", "譜面分支", "채보 분기"),
++            ["普通譜面"] = Row("普通譜面", "普通谱面", "普通譜面", "보통 채보"),
++            ["玄人譜面"] = Row("玄人譜面", "玄人谱面", "玄人譜面", "현인 채보"),
++            ["達人譜面"] = Row("達人譜面", "达人谱面", "達人譜面", "달인 채보"),
++            ["咔：切换分支    咚：选择小节"] = Row("カッ：分岐を切り替え    ドン：小節を選ぶ", "咔：切换分支    咚：选择小节", "咔：切換分支    咚：選擇小節", "캇: 분기 전환    동: 마디 선택"),
++            ["播放速度"] = Row("再生速度", "播放速度", "播放速度", "재생 속도"),
++            ["咔：调整速度    咚：开始练习"] = Row("カッ：速度を調整    ドン：練習を開始", "咔：调整速度    咚：开始练习", "咔：調整速度    咚：開始練習", "캇: 속도 조절    동: 연습 시작"),
++            ["小节进度"] = Row("小節", "小节进度", "小節進度", "마디"),
++            ["咔：前后小节    咚：调整播放速度"] = Row("カッ：前後の小節    ドン：再生速度を調整", "咔：前后小节    咚：调整播放速度", "咔：前後小節    咚：調整播放速度", "캇: 앞뒤 마디    동: 재생 속도 조절"),
++            ["有效击打"] = Row("有効な打音", "有效击打", "有效擊打", "유효 타격"),
++            ["漏打"] = Row("見逃し", "漏打", "漏打", "놓침"),
++            ["早"] = Row("早い", "早", "早", "빠름"),
++            ["晚"] = Row("遅い", "晚", "晚", "늦음"),
++            ["零偏差"] = Row("誤差なし", "零偏差", "零偏差", "편차 없음"),
++            ["自动演奏不统计手动偏差"] = Row("オートプレイは手動のずれを集計しません", "自动演奏不统计手动偏差", "自動演奏不統計手動偏差", "자동 연주는 수동 편차를 집계하지 않습니다"),
++            ["暂无有效击打"] = Row("有効な打音がありません", "暂无有效击打", "暫無有效擊打", "유효 타격이 없습니다"),
++            ["虚线：平均偏差"] = Row("破線：平均のずれ", "虚线：平均偏差", "虛線：平均偏差", "점선: 평균 편차"),
++            ["偏早"] = Row("早め", "偏早", "偏早", "빠름"),
++            ["偏晚"] = Row("遅め", "偏晚", "偏晚", "늦음"),
++            ["居中"] = Row("中央", "居中", "居中", "중앙"),
++            ["保存失败，请重试"] = Row("保存に失敗しました。もう一度試してください", "保存失败，请重试", "儲存失敗，請重試", "저장에 실패했습니다. 다시 시도하세요"),
++            ["已调整"] = Row("調整済み", "已调整", "已調整", "조정됨"),
++            ["自动演奏不提供偏移建议"] = Row("オートプレイではオフセットを提案しません", "自动演奏不提供偏移建议", "自動演奏不提供偏移建議", "자동 연주는 오프셋을 제안하지 않습니다"),
++            ["暂无有效击打，无法推荐"] = Row("有効な打音がないため提案できません", "暂无有效击打，无法推荐", "暫無有效擊打，無法推薦", "유효 타격이 없어 제안할 수 없습니다"),
++            ["本局未记录偏移设置，无法推荐"] = Row("このプレイのオフセットが記録されていないため提案できません", "本局未记录偏移设置，无法推荐", "本局未記錄偏移設定，無法推薦", "이번 플레이의 오프셋이 기록되지 않아 제안할 수 없습니다"),
++            ["偏移设置已变化，请重新游玩"] = Row("オフセットが変わっています。もう一度プレイしてください", "偏移设置已变化，请重新游玩", "偏移設定已變化，請重新遊玩", "오프셋이 바뀌었습니다. 다시 플레이하세요"),
++            ["下次游玩生效"] = Row("次のプレイから有効", "下次游玩生效", "下次遊玩生效", "다음 플레이부터 적용"),
++            ["已保存"] = Row("保存しました", "已保存", "已儲存", "저장했습니다"),
++            ["平均偏差不足 1 ms，无需调整"] = Row("平均のずれが 1 ms 未満のため調整不要です", "平均偏差不足 1 ms，无需调整", "平均偏差不足 1 ms，無需調整", "평균 편차가 1 ms 미만이라 조정할 필요가 없습니다"),
++            ["每次修正平均偏差的 ½ · 每项限本局一次"] = Row("平均のずれの ½ を補正 · 各項目はこのプレイで 1 回まで", "每次修正平均偏差的 ½ · 每项限本局一次", "每次修正平均偏差的 ½ · 每項限本局一次", "평균 편차의 ½을 보정 · 항목마다 이번 플레이에서 한 번"),
++            ["返回选曲"] = Row("曲選択にもどる", "返回选曲", "返回選曲", "곡 선택으로"),
++            ["跳过演出"] = Row("演出をスキップ", "跳过演出", "跳過演出", "연출 건너뛰기"),
++            ["判定详情"] = Row("判定の詳細", "判定详情", "判定詳情", "판정 상세"),
++            ["成绩"] = Row("成績", "成绩", "成績", "성적"),
++            ["サーバーログイン"] = Row("サーバーログイン", "服务器登录", "伺服器登入", "서버 로그인"),
++            ["songs"] = Row("曲", "首", "首", "곡"),
++            ["↑ / ↓ · Enter   Space / Esc · Resume"] = Row("↑ / ↓ · Enter   Space / Esc · 再開", "↑ / ↓ · 回车   空格 / Esc · 继续", "↑ / ↓ · Enter   空白鍵 / Esc · 繼續", "↑ / ↓ · Enter   Space / Esc · 계속"),
++            ["Press any key to add it (including Enter or Escape). Tap outside this panel to cancel."] =
++                Row("追加するキーを押してください（Enter と Escape も可）。このパネルの外をタップするとキャンセルします。",
++                    "按下要添加的键（包括 Enter 或 Esc）。点面板外部可取消。",
++                    "按下要新增的鍵（包括 Enter 或 Esc）。點面板外部可取消。",
++                    "추가할 키를 누르세요 (Enter와 Esc 포함). 패널 바깥을 탭하면 취소됩니다."),
++            ["Keyboard: 2P Left Don"] = Row("キーボード: 2P 左ドン", "键盘：2P 左咚", "鍵盤：2P 左咚", "키보드: 2P 왼쪽 동"),
++            ["Keyboard: 2P Right Don"] = Row("キーボード: 2P 右ドン", "键盘：2P 右咚", "鍵盤：2P 右咚", "키보드: 2P 오른쪽 동"),
++            ["Keyboard: 2P Left Ka"] = Row("キーボード: 2P 左カッ", "键盘：2P 左咔", "鍵盤：2P 左咔", "키보드: 2P 왼쪽 캇"),
++            ["Keyboard: 2P Right Ka"] = Row("キーボード: 2P 右カッ", "键盘：2P 右咔", "鍵盤：2P 右咔", "키보드: 2P 오른쪽 캇"),
++            ["Keyboard: Confirm"] = Row("キーボード: 決定", "键盘：确认", "鍵盤：確認", "키보드: 확인"),
++            ["Keyboard: Back"] = Row("キーボード: 戻る", "键盘：返回", "鍵盤：返回", "키보드: 뒤로"),
++            ["Keyboard: Pause"] = Row("キーボード: 一時停止", "键盘：暂停", "鍵盤：暫停", "키보드: 일시정지"),
++            ["Keyboard: Restart"] = Row("キーボード: やり直し", "键盘：重来", "鍵盤：重來", "키보드: 다시 시작"),
++            ["Keyboard: Menu Left"] = Row("キーボード: メニュー左", "键盘：菜单左", "鍵盤：選單左", "키보드: 메뉴 왼쪽"),
++            ["Keyboard: Menu Right"] = Row("キーボード: メニュー右", "键盘：菜单右", "鍵盤：選單右", "키보드: 메뉴 오른쪽"),
++            ["Keyboard: Menu Up"] = Row("キーボード: メニュー上", "键盘：菜单上", "鍵盤：選單上", "키보드: 메뉴 위"),
++            ["Keyboard: Menu Down"] = Row("キーボード: メニュー下", "键盘：菜单下", "鍵盤：選單下", "키보드: 메뉴 아래"),
++            ["Remove"] = Row("削除", "移除", "移除", "삭제"),
++            ["Done"] = Row("完了", "完成", "完成", "완료"),
++            ["Working…"] = Row("処理中…", "处理中…", "處理中…", "처리 중…"),
++            ["Still busy with the previous request."] = Row("前の処理がまだ終わっていません。", "上一个请求还在处理。", "上一個請求還在處理。", "이전 요청을 아직 처리 중입니다."),
++            ["Enter {0}P's username first."] = Row("{0}P のユーザー名を先に入力してください。", "请先输入 {0}P 的用户名。", "請先輸入 {0}P 的使用者名稱。", "{0}P 사용자 이름을 먼저 입력하세요."),
++            ["{0}P signed in as {1}"] =
++                Row("{0}P は {1} でサインインしました", "{0}P 已登录为 {1}", "{0}P 已登入為 {1}", "{0}P가 {1}(으)로 로그인했습니다"),
++            ["{0}P signed out."] = Row("{0}P をサインアウトしました。", "{0}P 已退出登录。", "{0}P 已登出。", "{0}P 로그아웃했습니다."),
++            ["{0}P is not signed in."] = Row("{0}P はサインインしていません。", "{0}P 未登录。", "{0}P 未登入。", "{0}P는 로그인되어 있지 않습니다."),
++            ["{0}P"] = Row("{0}P", "{0}P", "{0}P", "{0}P"),
++            ["Check both accounts and sign them in to the built-in servers again."] =
++                Row("両方のアカウントを確認し、内蔵サーバーにもう一度サインインしてください。",
++                    "检查两个账号，并重新登录内置服务器。",
++                    "檢查兩個帳號，並重新登入內建伺服器。",
++                    "두 계정을 확인하고 내장 서버에 다시 로그인하세요."),
++            ["Current output"] = Row("現在の出力", "当前输出", "目前輸出", "현재 출력"),
++            ["Applies on exit"] = Row("終了時に反映", "退出时生效", "結束時生效", "종료 시 적용"),
++            ["No audio output"] = Row("音声出力なし", "无音频输出", "無音訊輸出", "오디오 출력 없음"),
++            ["No output device (silent)"] = Row("出力デバイスなし（無音）", "无输出设备（静音）", "無輸出裝置（靜音）", "출력 장치 없음(무음)"),
++            ["BassSimple"] = Row("BassSimple", "BassSimple", "BassSimple", "BassSimple"),
++            ["WASAPI"] = Row("WASAPI", "WASAPI", "WASAPI", "WASAPI"),
++            ["ASIO"] = Row("ASIO", "ASIO", "ASIO", "ASIO"),
++            ["Automatic"] = Row("自動", "自动", "自動", "자동"),
++            ["Enter: save / Esc or tap outside: cancel"] =
++                Row("Enter：保存 / Esc または外をタップ：キャンセル", "回车：保存 / Esc 或点外部：取消", "Enter：儲存 / Esc 或點外部：取消", "Enter: 저장 / Esc 또는 바깥 탭: 취소"),
++        };
++
++        static string[] Row(string ja, string zh, string zhTw, string ko) => new[] { ja, zh, zhTw, ko };
++
++        public static string InGameLanguage(string language) =>
++            language == "ja" || language == "zh" || language == "zh_tw" ? language : "ja";
++
++        public static string Settings(string source) => Settings(source, CurrentLanguage());
++
++        // Settings text with placeholders, e.g. "{0}P signed out.".
++        public static string SettingsFormat(string source, params object[] args) =>
++            string.Format(Settings(source), args);
++        public static string InGame(string source) => InGame(source, CurrentLanguage());
++
++        public static string Settings(string source, string language)
++        {
++            if (string.IsNullOrEmpty(source) || language == "en") return source;
++            return Find(source, language) ?? source;
++        }
++
++        public static string InGame(string source, string language)
++        {
++            if (string.IsNullOrEmpty(source)) return source;
++            string shown = InGameLanguage(language);
++            if (shown == "ja") return Find(source, "ja") ?? source;
++            return Find(source, shown) ?? Find(source, "ja") ?? source;
++        }
++
++        // The language the settings and in-game lookups use right now.
++        public static string Language => CurrentLanguage();
++
++        static string CurrentLanguage() =>
++            SettingManager.Instance != null ? SettingManager.Instance.Settings.general.Language : "en";
++
++        static string Find(string source, string language)
++        {
++            if (!Table.TryGetValue(source, out string[] row)) return null;
++            int index = language switch { "ja" => 0, "zh" => 1, "zh_tw" => 2, "ko" => 3, _ => -1 };
++            return index < 0 ? null : row[index];
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs.meta b/Assets/OurTaiko/Runtime/Core/UiText.cs.meta
+new file mode 100644
+index 0000000..034b948
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: a4abd2e6cd5246158b0ce6e5f9b49204
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs b/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
+index d6a281c..a839b27 100644
+--- a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
++++ b/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
+@@ -39,6 +39,8 @@ void Fit()
+             var source = spriteRenderer.sprite;
+             if (source == null) return;
+             var size = rect.rect.size;
++            // A rect created this frame can still report an empty rect before the canvas lays out.
++            if (size.x < 1f || size.y < 1f) size = rect.sizeDelta;
+             var pixels = source.rect.size;
+             var child = spriteRenderer.transform;
+             child.localScale = new Vector3(size.x * source.pixelsPerUnit / pixels.x,
+diff --git a/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs b/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
+index 720adc3..3e13072 100644
+--- a/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
++++ b/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
+@@ -26,7 +26,15 @@ public Material Material
+         {
+             get
+             {
+-                if (material == null) material = new Material(sourceMaterial) { name = name + " Clip" };
++                if (material == null)
++                {
++                    material = sourceMaterial != null
++                        ? new Material(sourceMaterial)
++                        : new Material(Shader.Find("OurTaiko/Lane Sprite"));
++                    material.name = name + " Clip";
++                    if (clipRect == null)
++                        material.SetVector(ClipId, new Vector4(-Unbounded, -Unbounded, Unbounded, Unbounded));
++                }
+                 return material;
+             }
+         }
+diff --git a/Assets/OurTaiko/Runtime/Play/NoteArcView.cs b/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
+index aa6870a..551954a 100644
+--- a/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
++++ b/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
+@@ -14,16 +14,19 @@ public sealed class NoteArcView : MonoBehaviour
+         public int seat;
+ 
+         const float NoteSize = 192;
+-        readonly List<Arc> active = new List<Arc>(), pool = new List<Arc>();
++        readonly List<Arc> active = new List<Arc>(), imagePool = new List<Arc>(), spritePool = new List<Arc>();
++        LaneSpriteLayer spriteLayer;
+ 
+         sealed class Arc
+         {
+             public RectTransform Root;
+             public UnityEngine.UI.Image Image;
++            public LaneSprite Sprite;
+             public double Start;
+             public bool Big;
+             // Where the judge was when the note was hit, relative to its home (lane-local, y down).
+             public double StartDx, StartDy;
++            public bool UsesSprite => Sprite != null;
+         }
+ 
+         public int ActiveCount => active.Count;
+@@ -31,20 +34,13 @@ sealed class Arc
+ 
+         public void Spawn(Sprite sprite, bool big, double time, double startDx = 0, double startDy = 0)
+         {
++            bool sprites = UseSprites();
++            var pool = sprites ? spritePool : imagePool;
+             Arc arc;
+             if (pool.Count > 0) { arc = pool[pool.Count - 1]; pool.RemoveAt(pool.Count - 1); }
+-            else
+-            {
+-                var root = new GameObject("NoteArc", typeof(RectTransform)).GetComponent<RectTransform>();
+-                root.SetParent(transform, false);
+-                root.anchorMin = root.anchorMax = new Vector2(0, 1);
+-                root.pivot = new Vector2(0.5f, 0.5f);
+-                root.sizeDelta = new Vector2(NoteSize, NoteSize);
+-                var image = root.gameObject.AddComponent<UnityEngine.UI.Image>();
+-                image.raycastTarget = false;
+-                arc = new Arc { Root = root, Image = image };
+-            }
+-            arc.Image.sprite = sprite;
++            else arc = sprites ? CreateSpriteArc() : CreateImageArc();
++            if (arc.Image != null) arc.Image.sprite = sprite;
++            if (arc.Sprite != null) arc.Sprite.sprite = sprite;
+             arc.Start = time;
+             arc.Big = big;
+             arc.StartDx = startDx; arc.StartDy = startDy;
+@@ -54,9 +50,57 @@ public void Spawn(Sprite sprite, bool big, double time, double startDx = 0, doub
+             Place(arc, 0);
+         }
+ 
++        bool UseSprites() => SettingManager.Instance != null
++            && SettingManager.Instance.Settings.display.FlyingNoteDraw == DisplaySettings.FlyingSprite;
++
++        Arc CreateImageArc()
++        {
++            var root = new GameObject("NoteArc", typeof(RectTransform)).GetComponent<RectTransform>();
++            root.SetParent(transform, false);
++            root.anchorMin = root.anchorMax = new Vector2(0, 1);
++            root.pivot = new Vector2(0.5f, 0.5f);
++            root.sizeDelta = new Vector2(NoteSize, NoteSize);
++            var image = root.gameObject.AddComponent<UnityEngine.UI.Image>();
++            image.raycastTarget = false;
++            return new Arc { Root = root, Image = image };
++        }
++
++        // Sprites live on a transform with no CanvasRenderer, so moving them does not rebuild the UI.
++        Arc CreateSpriteArc()
++        {
++            var root = new GameObject("NoteArcSprite", typeof(RectTransform)).GetComponent<RectTransform>();
++            root.SetParent(transform, false);
++            root.anchorMin = root.anchorMax = new Vector2(0, 1);
++            root.pivot = new Vector2(0.5f, 0.5f);
++            root.sizeDelta = new Vector2(NoteSize, NoteSize);
++            var sprite = root.gameObject.AddComponent<LaneSprite>();
++            // Share the lane's material. A new SortingGroup keeps these notes above the lane
++            // without joining the interface canvas that redraws every moving image.
++            var layer = SpriteLayer();
++            sprite.Initialize(layer, null, 40);
++            var group = root.gameObject.AddComponent<UnityEngine.Rendering.SortingGroup>();
++            group.sortingOrder = 40;
++            return new Arc { Root = root, Sprite = sprite };
++        }
++
++        LaneSpriteLayer SpriteLayer()
++        {
++            if (spriteLayer != null) return spriteLayer;
++            var host = new GameObject("FlyingNoteSprites");
++            host.transform.SetParent(transform, false);
++            spriteLayer = host.AddComponent<LaneSpriteLayer>();
++            var laneLayer = lane != null ? lane.GetComponentInChildren<LaneSpriteLayer>() : null;
++            if (laneLayer != null) spriteLayer.sourceMaterial = laneLayer.sourceMaterial;
++            return spriteLayer;
++        }
++
+         public void ResetDisplay()
+         {
+-            foreach (var arc in active) { arc.Root.gameObject.SetActive(false); pool.Add(arc); }
++            foreach (var arc in active)
++            {
++                arc.Root.gameObject.SetActive(false);
++                (arc.UsesSprite ? spritePool : imagePool).Add(arc);
++            }
+             active.Clear();
+             if (gaugeHitEffect != null) gaugeHitEffect.ResetDisplay();
+         }
+@@ -69,8 +113,10 @@ public void ShowTime(double time)
+                 double elapsed = time - arc.Start;
+                 if (!NoteArcPath.IsFinished(elapsed)) { Place(arc, NoteArcPath.Progress(elapsed)); continue; }
+                 arc.Root.gameObject.SetActive(false);
+-                pool.Add(arc); active.RemoveAt(i--);
+-                if (gaugeHitEffect != null) gaugeHitEffect.Play(arc.Image.sprite, arc.Big, arc.Start + NoteArcPath.Duration);
++                Sprite finished = arc.Image != null ? arc.Image.sprite : arc.Sprite.sprite;
++                (arc.UsesSprite ? spritePool : imagePool).Add(arc);
++                active.RemoveAt(i--);
++                if (gaugeHitEffect != null) gaugeHitEffect.Play(finished, arc.Big, arc.Start + NoteArcPath.Duration);
+             }
+             if (gaugeHitEffect != null) gaugeHitEffect.ShowTime(time);
+         }
+diff --git a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
+index 53e73f2..537aa81 100644
+--- a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
++++ b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
+@@ -26,9 +26,27 @@ public void Show()
+             // remains responsible for mouse/touch clicks, without a second keyboard submit.
+             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+             Select(0);
++            ApplyLanguage();
+             opening = StartCoroutine(Fade(1));
+         }
+ 
++        void ApplyLanguage()
++        {
++            string[] captions = { "Resume", "Restart", "Back to Song Select" };
++            for (int i = 0; i < buttons.Length && i < captions.Length; i++)
++            {
++                var label = buttons[i].GetComponentInChildren<TMPro.TMP_Text>(true);
++                if (label != null) label.text = UiText.InGame(captions[i]);
++            }
++            var texts = GetComponentsInChildren<TMPro.TMP_Text>(true);
++            for (int i = 0; i < texts.Length; i++)
++            {
++                if (texts[i].gameObject.name == "Title") texts[i].text = UiText.InGame("PAUSED");
++                if (texts[i].gameObject.name == "Hint")
++                    texts[i].text = UiText.InGame("↑ / ↓ · Enter   Space / Esc · Resume");
++            }
++        }
++
+         public IEnumerator Hide()
+         {
+             if (opening != null) { StopCoroutine(opening); opening = null; }
+diff --git a/Assets/OurTaiko/Runtime/Play/PlayScene.cs b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
+index 8eb956b..1de94e5 100644
+--- a/Assets/OurTaiko/Runtime/Play/PlayScene.cs
++++ b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
+@@ -137,7 +137,7 @@ IEnumerator Start()
+             {
+                 Debug.LogException(error);
+                 IsFinished = true; resultPanel.SetActive(true);
+-                resultText.text = "CHART COULD NOT LOAD\n<size=22>" + error.Message + "</size>";
++                resultText.text = UiText.InGame("CHART COULD NOT LOAD") + "\n<size=22>" + error.Message + "</size>";
+             }
+             if (IsFinished) yield break;
+             while (switcher.IsInputBlocked) yield return null;
+diff --git a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
+index 1a7d335..027fac2 100644
+--- a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
++++ b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
+@@ -247,6 +247,8 @@ void SpawnArc(int index, Judgment result)
+         {
+             if (Views.noteArcs == null) return;
+             var note = Session.Chart.Notes[index];
++            var display = SettingManager.Instance != null ? SettingManager.Instance.Settings.display : null;
++            if (display != null && !display.Flies(result == Judgment.Roll && note.IsDrumroll)) return;
+             NoteKind kind;
+             if (result == Judgment.Good || result == Judgment.Ok) kind = note.Kind;
+             else if (result != Judgment.Roll || note.Kind == NoteKind.Kusudama) return;
+diff --git a/Assets/OurTaiko/Runtime/Play/PracticeView.cs b/Assets/OurTaiko/Runtime/Play/PracticeView.cs
+index 6c01dfe..4ab5d7e 100644
+--- a/Assets/OurTaiko/Runtime/Play/PracticeView.cs
++++ b/Assets/OurTaiko/Runtime/Play/PracticeView.cs
+@@ -16,19 +16,19 @@ public void Show(PracticeStage stage, PracticeProgress progress, BranchRoute bra
+             switch (stage)
+             {
+                 case PracticeStage.Branch:
+-                    heading.text = "谱面分支";
+-                    value.text = Branches[(int)branch];
+-                    hint.text = "咔：切换分支    咚：选择小节";
++                    heading.text = UiText.InGame("谱面分支");
++                    value.text = UiText.InGame(Branches[(int)branch]);
++                    hint.text = UiText.InGame("咔：切换分支    咚：选择小节");
+                     break;
+                 case PracticeStage.Speed:
+-                    heading.text = "播放速度";
++                    heading.text = UiText.InGame("播放速度");
+                     value.text = progress.Speed.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "x";
+-                    hint.text = "咔：调整速度    咚：开始练习";
++                    hint.text = UiText.InGame("咔：调整速度    咚：开始练习");
+                     break;
+                 default:
+-                    heading.text = "小节进度";
++                    heading.text = UiText.InGame("小节进度");
+                     value.text = (progress.Measure + 1) + " / " + progress.Count;
+-                    hint.text = "咔：前后小节    咚：调整播放速度";
++                    hint.text = UiText.InGame("咔：前后小节    咚：调整播放速度");
+                     break;
+             }
+         }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+index 4b62b4b..4c7aed5 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+@@ -126,6 +126,9 @@ void Bind()
+             Board = new EntryModeList(view, Clip(modeBoardTimeline), Clip(cursorGlowTimeline), Clip(modeListTimeline));
+             Modes = new EntryMode[Board.Boards.Count];
+             for (int i = 0; i < Modes.Length; i++) Modes[i] = Board.Boards[i].Mode;
++            // The board captions are authored in Japanese; show them in the in-game language.
++            foreach (var board in view.boards)
++                if (board.title != null) board.title.text = UiText.InGame(board.title.text);
+             Credit = new EntryCredit(view, Clip(creditRowTimeline), Clip(creditFadeTimeline));
+             Guide = new ControlGuideView(view.controlGuide, overlay);
+             Nameplate = view.nameplate;
+diff --git a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs b/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs
+index 1ac0906..423ef05 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs
+@@ -65,7 +65,7 @@ void ShowAccounts()
+                 if (item.ActionId != null && item.ActionId.StartsWith(SettingsMenu.SignOutAction) && item != running)
+                 {
+                     var account = accounts.Seats[item.ActionId[SettingsMenu.SignOutAction.Length] - '0'];
+-                    item.Status = account.IsSignedIn ? "Signed in: " + (account.Nickname.Length > 0 ? account.Nickname : account.Username) : "Not signed in";
++                    item.Status = account.IsSignedIn ? UiText.Settings("Signed in") + ": " + (account.Nickname.Length > 0 ? account.Nickname : account.Username) : UiText.Settings("Not signed in");
+                 }
+         }
+ 
+@@ -134,8 +134,9 @@ void Handle(SettingsMenu.Result result)
+             if (result == SettingsMenu.Result.Changed)
+             {
+                 SettingManager.EnsureInstance().Set(Menu.Settings);
+-                if (Menu.CurrentItem.Label == "Drum Volume") sfx.PlayAudioOneShot(don, AudioGroup.Drum);
+-                else if (Menu.CurrentItem.Label == "Voice Volume" && previewVoice != null) sfx.PlayAudioOneShot(previewVoice, AudioGroup.Voice);
++                // Labels are translated now, so compare against the same language's text.
++                if (Menu.CurrentItem.Label == UiText.Settings("Drum Volume")) sfx.PlayAudioOneShot(don, AudioGroup.Drum);
++                else if (Menu.CurrentItem.Label == UiText.Settings("Voice Volume") && previewVoice != null) sfx.PlayAudioOneShot(previewVoice, AudioGroup.Voice);
+                 else Play(don);
+             }
+             else Play(result == SettingsMenu.Result.Moved ? ka : don);
+@@ -153,18 +154,18 @@ void Handle(SettingsMenu.Result result)
+         async void RunAction(SettingItem item, string action, string text = null)
+         {
+             var online = OnlineManager.EnsureInstance();
+-            if (running != null || online.IsBusy) { view.status = "Still busy with the previous request."; view.Show(Menu); return; }
++            if (running != null || online.IsBusy) { view.status = UiText.Settings("Still busy with the previous request."); view.Show(Menu); return; }
+             bool account = action.StartsWith(SettingsMenu.SignInAction) || action.StartsWith(SettingsMenu.SignOutAction);
+             int seat = account ? action[action.Length - 1] - '0' : 0;
+             string username = seat == 0 ? Menu.Settings.accounts.p1Username : Menu.Settings.accounts.p2Username;
+             if (action.StartsWith(SettingsMenu.SignInAction) && (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(text)))
+             {
+-                view.status = string.IsNullOrEmpty(username) ? $"Enter {seat + 1}P's username first." : "";
++                view.status = string.IsNullOrEmpty(username) ? UiText.SettingsFormat("Enter {0}P's username first.", seat + 1) : "";
+                 view.Show(Menu);
+                 return;
+             }
+             running = item;
+-            item.Status = "Working…";
++            item.Status = UiText.Settings("Working…");
+             view.Show(Menu);
+             actionCancel = new CancellationTokenSource();
+             var cancel = actionCancel;
+@@ -180,18 +181,19 @@ async void RunAction(SettingItem item, string action, string text = null)
+                     try
+                     {
+                         await online.SignInAsync(seat, username, text, cancel.Token);
+-                        view.status = $"{seat + 1}P signed in as {online.Accounts.Seats[seat].Nickname}.   •   {online.LoginSummary}";
++                        view.status = UiText.SettingsFormat("{0}P signed in as {1}", seat + 1,
++                            online.Accounts.Seats[seat].Nickname) + ".   •   " + online.LoginSummary;
+                     }
+                     catch (System.Exception error) when (!cancel.IsCancellationRequested)
+                     {
+-                        view.status = $"{seat + 1}P: " + OnlineManager.Describe(error);
++                        view.status = UiText.SettingsFormat("{0}P", seat + 1) + ": " + OnlineManager.Describe(error);
+                     }
+                 }
+                 else if (action.StartsWith(SettingsMenu.SignOutAction))
+                 {
+                     bool was = online.Accounts.Seats[seat].IsSignedIn;
+                     await online.SignOutAsync(seat, cancel.Token);
+-                    view.status = was ? $"{seat + 1}P signed out." : $"{seat + 1}P is not signed in.";
++                    view.status = was ? UiText.SettingsFormat("{0}P signed out.", seat + 1) : UiText.SettingsFormat("{0}P is not signed in.", seat + 1);
+                 }
+                 else
+                 {
+@@ -203,7 +205,7 @@ async void RunAction(SettingItem item, string action, string text = null)
+             finally { cancel.Dispose(); if (actionCancel == cancel) actionCancel = null; }
+             if (this == null) return;
+             running = null;
+-            item.Status = account ? "" : "Done";
++            item.Status = account ? "" : UiText.Settings("Done");
+             ShowAccounts();
+             view.Show(Menu);
+         }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingView.cs b/Assets/OurTaiko/Runtime/Scenes/GlobalSettingView.cs
+index 9a571bc..1c273b0 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/GlobalSettingView.cs
+@@ -52,6 +52,10 @@ public sealed class Row
+         public int visibleItems = 4;
+         public int FirstItem { get; private set; }
+         public int FirstChoice { get; private set; }
++        // The heading above the type list (ゲーム設定 in the authored art). Found by name and
++        // deliberately not serialized: adding a serialized field to a MonoBehaviour would shift
++        // the field layout of the scenes already built into the shipped data.unity3d.
++        TMP_Text title;
+         int lastType = -1;
+         Vector2 typeBase, itemBase, choiceBase;
+         bool bound;
+@@ -110,6 +114,12 @@ void Hook()
+ 
+         public void Show(SettingsMenu menu)
+         {
++            if (title == null)
++            {
++                var header = transform.Find("Header");
++                if (header != null) title = header.GetComponent<TMP_Text>();
++            }
++            if (title != null) title.text = UiText.InGame("ゲーム設定");
+             Bind();
+             int types = menu.TypeCount;
+             int items = menu.CurrentType != null ? menu.ItemCount : 0;
+@@ -129,7 +139,7 @@ public void Show(SettingsMenu menu)
+                 row.root.gameObject.SetActive(shown);
+                 if (!shown) continue;
+                 row.root.anchoredPosition = typeBase + new Vector2(0, -i * typePitch);
+-                row.label.text = i < menu.Types.Count ? menu.Types[i].Label : "Return";
++                row.label.text = UiText.Settings(i < menu.Types.Count ? menu.Types[i].Label : "Return");
+                 row.box.sprite = i == menu.TypeIndex ? typeBoxSelected : typeBox;
+             }
+ 
+@@ -143,10 +153,17 @@ public void Show(SettingsMenu menu)
+             if (outputStatus != null)
+             {
+                 var engine = AudioEngine.Instance;
+-                outputStatus.text = menu.CurrentType?.Label == "Sound" && engine != null
+-                    ? (!engine.Available ? "No audio output: " + engine.Failure
+-                        : engine.Silent ? "No output device (silent): " + engine.Failure
+-                        : $"Current output: {engine.Backend}") + (engine.HasPendingDeviceChanges ? "   •   Applies on exit" : "") : status ?? "";
++                if (menu.CurrentType?.Label == "Sound" && engine != null)
++                {
++                    string line = !engine.Available
++                        ? UiText.Settings("No audio output") + ": " + engine.Failure
++                        : engine.Silent
++                            ? UiText.Settings("No output device (silent)") + ": " + engine.Failure
++                            : UiText.Settings("Current output") + ": " + UiText.Settings(engine.Backend.ToString());
++                    if (engine.HasPendingDeviceChanges) line += "   •   " + UiText.Settings("Applies on exit");
++                    outputStatus.text = line;
++                }
++                else outputStatus.text = UiText.Settings(status ?? "");
+                 outputStatus.enableAutoSizing = true; outputStatus.fontSizeMin = 18; outputStatus.fontSizeMax = 30;
+             }
+             bool inItems = menu.Focus != SettingsFocus.Types;
+@@ -159,10 +176,10 @@ public void Show(SettingsMenu menu)
+                 row.root.anchoredPosition = itemBase + new Vector2(0, -(i - FirstItem) * itemPitch);
+                 bool isReturn = i == menu.CurrentType.Items.Count;
+                 var rowItem = isReturn ? null : menu.CurrentType.Items[i];
+-                row.label.text = isReturn ? "Return" : rowItem.Label;
++                row.label.text = UiText.Settings(isReturn ? "Return" : rowItem.Label);
+                 row.value.enableAutoSizing = true; row.value.fontSizeMin = 18; row.value.fontSizeMax = 40;
+                 row.value.overflowMode = TextOverflowModes.Ellipsis;
+-                row.value.text = isReturn ? "" : rowItem.Format(menu.Settings);
++                row.value.text = isReturn ? "" : UiText.Settings(rowItem.Format(menu.Settings));
+                 row.box.sprite = inItems && i == menu.ItemIndex ? itemBoxSelected : itemBox;
+             }
+ 
+@@ -177,16 +194,16 @@ public void Show(SettingsMenu menu)
+             if (nextChoice != null) nextChoice.gameObject.SetActive(open && !menu.CapturingKey && (numeric || choices > 3));
+             if (open)
+             {
+-                detailTitle.text = shownItem.Label;
++                detailTitle.text = UiText.Settings(shownItem.Label);
+                 description.enableAutoSizing = true; description.fontSizeMin = 22; description.fontSizeMax = 32;
+                 description.overflowMode = TextOverflowModes.Ellipsis;
+                 description.text = menu.CapturingKey
+-                    ? "Press any key to add it (including Enter or Escape). Tap outside this panel to cancel."
+-                    : shownItem.Description;
++                    ? UiText.Settings("Press any key to add it (including Enter or Escape). Tap outside this panel to cancel.")
++                    : UiText.Settings(shownItem.Description);
+                 if (shownItem.BindingKey.HasValue && !menu.CapturingKey)
+-                    description.text += "\nBound: " + menu.Settings.general.keyboard.Format(shownItem.BindingKey.Value);
++                    description.text += "\n" + UiText.Settings("Bound") + ": " + menu.Settings.general.keyboard.Format(shownItem.BindingKey.Value);
+                 if (numeric) description.text += "  " + shownItem.NumberHint;
+-                if (typing) description.text += "\nEnter: save / Esc or tap outside: cancel";
++                if (typing) description.text += "\n" + UiText.Settings("Enter: save / Esc or tap outside: cancel");
+                 int lit = numeric ? 0 : menu.ChoiceIndex;
+                 FirstChoice = Mathf.Clamp(lit - 1, 0, Math.Max(0, choices - 3));
+                 int count = Math.Min(3, choices);
+@@ -201,7 +218,7 @@ public void Show(SettingsMenu menu)
+                     row.root.anchoredPosition = choiceBase + new Vector2((i - (count - 1) / 2f) * choicePitch + shift, 0);
+                     row.label.enableAutoSizing = true; row.label.fontSizeMin = 18; row.label.fontSizeMax = 40;
+                     row.label.overflowMode = TextOverflowModes.Ellipsis;
+-                    row.label.text = numeric ? shownItem.Format(menu.ChoiceIndex) : menu.Choices[i + FirstChoice];
++                    row.label.text = UiText.Settings(numeric ? shownItem.Format(menu.ChoiceIndex) : menu.Choices[i + FirstChoice]);
+                     row.box.sprite = i + FirstChoice == lit ? choiceOn : choiceOff;
+                 }
+             }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
+index 0228594..3caa2dc 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
+@@ -13,7 +13,7 @@ namespace OurTaiko
+     public sealed class LocalSongLibrary : MonoBehaviour
+     {
+         public static LocalSongLibrary Instance { get; private set; }
+-        public static string DefaultRoot => Path.Combine(GamePaths.Root, "Songs");
++        public static string DefaultRoot => GamePaths.SongsDirectory(GamePaths.Root);
+ 
+         public IReadOnlyList<string> Roots => roots;
+         // Charts outside box.def folders, by path; then the top-level box.def folders, which hold
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
+index d4e4570..2a1214f 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
+@@ -35,11 +35,11 @@ public void Bind(PlayResult result)
+             mean.text = data?.MeanMs is double m ? m.ToString("+0.0;-0.0;0.0", CultureInfo.InvariantCulture) + " ms" : "—";
+             deviation.text = Number(data?.StandardDeviationMs);
+             absolute.text = Number(data?.MeanAbsoluteMs);
+-            counts.text = $"有效击打 {data?.Count ?? 0}    漏打 {data?.Misses ?? 0}";
+-            sides.text = $"早 {data?.Early ?? 0}    晚 {data?.Late ?? 0}" + (data?.Exact > 0 ? $"    零偏差 {data.Exact}" : "");
+-            empty.text = result.AutoPlay ? "自动演奏不统计手动偏差" : data == null || data.Count == 0 ? "暂无有效击打" : "";
++            counts.text = $"{T("有效击打")} {data?.Count ?? 0}    {T("漏打")} {data?.Misses ?? 0}";
++            sides.text = $"{T("早")} {data?.Early ?? 0}    {T("晚")} {data?.Late ?? 0}" + (data?.Exact > 0 ? $"    {T("零偏差")} {data.Exact}" : "");
++            empty.text = result.AutoPlay ? T("自动演奏不统计手动偏差") : data == null || data.Count == 0 ? T("暂无有效击打") : "";
+             meanLegend.text = data?.MeanMs is double average
+-                ? "虚线：平均偏差 · " + (average < 0 ? "偏早" : average > 0 ? "偏晚" : "居中") : "虚线：平均偏差";
++                ? T("虚线：平均偏差") + " · " + (average < 0 ? T("偏早") : average > 0 ? T("偏晚") : T("居中")) : T("虚线：平均偏差");
+             for (int i = 0; i < yLabels.Length; i++) yLabels[i].text = (histogram.AxisMaximum * i / 4).ToString();
+             Details = false; changedAt = double.NegativeInfinity;
+             DrawPages();
+@@ -57,7 +57,7 @@ public bool ApplyOffset(bool audio)
+             }
+             catch (Exception error)
+             {
+-                calibrationError = "保存失败，请重试";
++                calibrationError = T("保存失败，请重试");
+                 Debug.LogWarning("Could not save timing adjustment: " + error.Message);
+                 DrawCalibration();
+                 return false;
+@@ -72,19 +72,19 @@ void DrawCalibration()
+             bool canAudio = calibration?.CanApply(current, true) == true;
+             bool canJudge = calibration?.CanApply(current, false) == true;
+             string Recommendation(int value, int? target) => target.HasValue ? Milliseconds(value) + " → " + Milliseconds(target.Value) : "—";
+-            audioRecommendation.text = calibration == null ? "—" : calibration.AudioApplied ? "已调整 · " + Milliseconds(calibration.RecommendedAudioMs.Value) : Recommendation(calibration.AudioOffsetMs, calibration.RecommendedAudioMs);
+-            judgeRecommendation.text = calibration == null ? "—" : calibration.JudgeApplied ? "已调整 · " + Milliseconds(calibration.RecommendedJudgeMs.Value) : Recommendation(calibration.JudgeOffsetMs, calibration.RecommendedJudgeMs);
++            audioRecommendation.text = calibration == null ? "—" : calibration.AudioApplied ? T("已调整") + " · " + Milliseconds(calibration.RecommendedAudioMs.Value) : Recommendation(calibration.AudioOffsetMs, calibration.RecommendedAudioMs);
++            judgeRecommendation.text = calibration == null ? "—" : calibration.JudgeApplied ? T("已调整") + " · " + Milliseconds(calibration.RecommendedJudgeMs.Value) : Recommendation(calibration.JudgeOffsetMs, calibration.RecommendedJudgeMs);
+             adjustAudio.GetComponent<CanvasGroup>().alpha = canAudio ? 1 : .45f;
+             adjustJudge.GetComponent<CanvasGroup>().alpha = canJudge ? 1 : .45f;
+             if (calibrationError != null) calibrationStatus.text = calibrationError;
+-            else if (boundResult?.AutoPlay == true) calibrationStatus.text = "自动演奏不提供偏移建议";
+-            else if (boundResult?.Timing == null || boundResult.Timing.Count == 0) calibrationStatus.text = "暂无有效击打，无法推荐";
+-            else if (calibration == null) calibrationStatus.text = "本局未记录偏移设置，无法推荐";
+-            else if (!calibration.Matches(current)) calibrationStatus.text = "偏移设置已变化，请重新游玩";
++            else if (boundResult?.AutoPlay == true) calibrationStatus.text = T("自动演奏不提供偏移建议");
++            else if (boundResult?.Timing == null || boundResult.Timing.Count == 0) calibrationStatus.text = T("暂无有效击打，无法推荐");
++            else if (calibration == null) calibrationStatus.text = T("本局未记录偏移设置，无法推荐");
++            else if (!calibration.Matches(current)) calibrationStatus.text = T("偏移设置已变化，请重新游玩");
+             else if (calibration.AudioApplied || calibration.JudgeApplied)
+-                calibrationStatus.text = "已保存 " + (calibration.AudioApplied && calibration.JudgeApplied ? "A / B" : calibration.AudioApplied ? "A" : "B") + "，下次游玩生效";
+-            else if (calibration.CorrectionMs == 0) calibrationStatus.text = "平均偏差不足 1 ms，无需调整";
+-            else calibrationStatus.text = "每次修正平均偏差的 ½ · 每项限本局一次";
++                calibrationStatus.text = T("已保存") + " " + (calibration.AudioApplied && calibration.JudgeApplied ? "A / B" : calibration.AudioApplied ? "A" : "B") + "，" + T("下次游玩生效");
++            else if (calibration.CorrectionMs == 0) calibrationStatus.text = T("平均偏差不足 1 ms，无需调整");
++            else calibrationStatus.text = T("每次修正平均偏差的 ½ · 每项限本局一次");
+         }
+         public void SetPage(bool details, int moveDirection)
+         {
+@@ -92,7 +92,8 @@ public void SetPage(bool details, int moveDirection)
+             Details = details; direction = moveDirection < 0 ? -1 : 1; changedAt = GameTimeline.FrameTime;
+             DrawPages();
+         }
+-        public void SetReady(bool complete) => actionLabel.text = complete ? "返回选曲" : "跳过演出";
++        public void SetReady(bool complete) => actionLabel.text = complete ? T("返回选曲") : T("跳过演出");
++        static string T(string source) => UiText.InGame(source);
+         void Update() => DrawPages();
+         void DrawPages()
+         {
+@@ -114,7 +115,7 @@ void Page(CanvasGroup group, bool entering)
+                 ((RectTransform)offsetControls.transform).anchoredPosition = ((RectTransform)detailPage.transform).anchoredPosition;
+                 DrawCalibration();
+             }
+-            pageName.text = Details ? "判定详情" : "成绩";
++            pageName.text = Details ? T("判定详情") : T("成绩");
+             for (int i = 0; i < dots.Length; i++) dots[i].color = i == (Details ? 1 : 0)
+                 ? new Color32(238, 82, 39, 255) : new Color32(180, 172, 152, 255);
+         }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs b/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
+index 8cdb0d0..b689be7 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
+@@ -89,7 +89,7 @@ void ShowServer(int index)
+             ServerIndex = index;
+             outcomes.Add(Outcome.None);
+             var server = Server;
+-            view.header.text = "サーバーログイン";
++            view.header.text = UiText.InGame("サーバーログイン");
+             view.serverName.text = server.DisplayName;
+             view.serverUrl.text = server.baseUrl;
+             view.progress.text = servers.Count > 1 ? $"{index + 1} / {servers.Count}" : "";
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs b/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
+index b3c969c..5599eb3 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
+@@ -30,7 +30,13 @@ public sealed class SongSearchView : MonoBehaviour, IPointerClickHandler
+         public int FocusedRow => row;
+         public bool BlocksInput => IsOpen || Time.frameCount == closedFrame;
+         string Language => SettingManager.Instance?.Settings.general.Language ?? "en";
+-        string Words(string en, string ja, string zh) => Language == "ja" ? ja : Language.StartsWith("zh") ? zh : en;
++        string Words(string en, string ja, string zh, string zhTw = null)
++        {
++            string language = UiText.InGameLanguage(Language);
++            if (language == "zh") return zh;
++            if (language == "zh_tw") return string.IsNullOrEmpty(zhTw) ? ja : zhTw;
++            return string.IsNullOrEmpty(ja) ? en : ja;
++        }
+ 
+         public void Bind(SongSelectManager model)
+         {
+@@ -187,16 +193,16 @@ public void Tick()
+         }
+         void Draw()
+         {
+-            title.text = Words("Song search", "曲をさがす", "歌曲搜索");
+-            string all = Words("All", "すべて", "全部");
+-            labels[0].text = Words("Difficulty", "むずかしさ", "难度"); labels[1].text = Words("Stars", "★の数", "星级");
+-            labels[2].text = Words("Sort by", "表示順", "排序"); labels[3].text = Words("Keyword", "キーワード", "关键词");
+-            ((TMP_Text)keyword.placeholder).text = Words("Title / Subtitle / Maker", "曲名 / サブタイトル / 譜面作者", "曲名 / 副标题 / 谱师");
++            title.text = Words("Song search", "曲をさがす", "歌曲搜索", "歌曲搜尋");
++            string all = Words("All", "すべて", "全部", "全部");
++            labels[0].text = Words("Difficulty", "むずかしさ", "难度", "難度"); labels[1].text = Words("Stars", "★の数", "星级", "星級");
++            labels[2].text = Words("Sort by", "表示順", "排序", "排序"); labels[3].text = Words("Keyword", "キーワード", "关键词", "關鍵詞");
++            ((TMP_Text)keyword.placeholder).text = Words("Title / Subtitle / Maker", "曲名 / サブタイトル / 譜面作者", "曲名 / 副标题 / 谱师", "曲名 / 副標題 / 譜師");
+             values[0].text = difficulty == 0 ? all : new[] { "Easy", "Normal", "Hard", "Oni", "Ura" }[difficulty - 1];
+             values[1].text = level == 0 ? all : "★ " + level;
+             values[2].text = order == 0 ? Words("Default", "いつもどおり", "通常") : order == 1 ? Words("Not FC first", "未フルコンボ優先", "未 FC 优先") : Words("Not AP first", "未ドンダフル優先", "未 AP 优先");
+-            apply.GetComponentInChildren<TMP_Text>().text = busy ? Words("Searching…", "検索中…", "搜索中…") : Words("Search", "検索", "搜索");
+-            close.GetComponentInChildren<TMP_Text>().text = Words("Back", "もどる", "返回");
++            apply.GetComponentInChildren<TMP_Text>().text = busy ? Words("Searching…", "検索中…", "搜索中…", "搜尋中…") : Words("Search", "検索", "搜索", "搜尋");
++            close.GetComponentInChildren<TMP_Text>().text = Words("Back", "もどる", "返回", "返回");
+             hint.text = Application.isMobilePlatform
+                 ? editingKeyword
+                     ? Words("Close the keyboard to finish typing", "キーボードを閉じて入力を終了", "收起键盘，结束输入")
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
+index 742a2e5..fb8ca02 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
+@@ -20,16 +20,18 @@ internal void PlaySearchSound(Sound sound)
+         public int SearchCount => searchSongs.Count;
+         public event Action WheelRebuilt;
+         public event Action SearchRequested;
+-        public string SearchFolderTitle => Words("Search / Sort", "検索・並べ替え", "搜索／排序");
+-        public string SearchFolderDescription => Words("Keyword · Difficulty · Stars · FC / AP", "Keyword・むずかしさ・★・FC / AP", "Keyword · 难度 · 星级 · FC / AP");
++        public string SearchFolderTitle => Words("Search / Sort", "検索・並べ替え", "搜索／排序", "搜尋／排序");
++        public string SearchFolderDescription => Words("Keyword · Difficulty · Stars · FC / AP", "Keyword・むずかしさ・★・FC / AP", "Keyword · 难度 · 星级 · FC / AP", "Keyword · 難度 · 星級 · FC / AP");
+         // The source folder (its key) the search covers, null for every source; set by the search
+         // board that opened the dialog and kept while the results show.
+         public string SearchScope { get; private set; }
+         string searchScopeTitle, searchHomeKey;
+-        static string Words(string en, string ja, string zh)
++        static string Words(string en, string ja, string zh, string zhTw = null)
+         {
+-            string language = SettingManager.Instance?.Settings.general.Language ?? "en";
+-            return language == "ja" ? ja : language.StartsWith("zh") ? zh : en;
++            string language = UiText.InGameLanguage(SettingManager.Instance?.Settings.general.Language ?? "en");
++            if (language == "zh") return zh;
++            if (language == "zh_tw") return string.IsNullOrEmpty(zhTw) ? ja : zhTw;
++            return string.IsNullOrEmpty(ja) ? en : ja;
+         }
+         static WheelItem NewSearchItem() => new WheelItem { Kind = ItemKind.Search };
+ 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+index 4876231..10a502e 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+@@ -107,7 +107,7 @@ void BindFolder(Board board, FolderSlot slot)
+             item.charaLeft.enabled = item.charaRight.enabled = false;
+             item.title.text = back ? SongSelectManager.BackLabel : search ? Manager.SearchFolderTitle : folder.Title;
+             item.title.Squeeze(860);
+-            item.count.text = back ? "" : search ? Manager.SearchDescription(board.Item) : $"{folder.SongCount} songs　{folder.ServerName}";
++            item.count.text = back ? "" : search ? Manager.SearchFolderDescription : $"{folder.SongCount} {UiText.InGame("songs")}　{folder.ServerName}";
+             if (!back)
+             {
+                 item.panelOpen.sprite = folderBoards[board.Genre];
+diff --git a/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs
+new file mode 100644
+index 0000000..c8c52c7
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs
+@@ -0,0 +1,49 @@
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class FlyingNoteDrawTests
++    {
++        [Test]
++        public void MissingAndUnknownValuesStayOnTheCurrentDrawing()
++        {
++            Assert.That(new GameSettings().display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingCurrent));
++            Assert.That(GameSettings.FromJson("{}").display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingCurrent));
++            Assert.That(GameSettings.FromJson("{\"display\":{\"flyingNoteDraw\":9}}").display.FlyingNoteDraw,
++                Is.EqualTo(DisplaySettings.FlyingCurrent));
++        }
++
++        [Test]
++        public void SpriteChoiceIsSavedAndRestored()
++        {
++            var settings = new GameSettings();
++            settings.display.flyingNoteDraw = DisplaySettings.FlyingSprite;
++            var menu = new SettingsMenu(SettingsMenu.Catalog(), settings);
++            menu.Ka(2); menu.Don(); menu.Ka(4);
++            Assert.That(menu.CurrentItem.Label, Is.EqualTo("Flying Notes"));
++            Assert.That(menu.CurrentItem.Choices, Is.EqualTo(new[] { "Images", "Sprite" }));
++            Assert.That(menu.CurrentItem.Get(menu.Settings), Is.EqualTo(DisplaySettings.FlyingSprite));
++            var loaded = GameSettings.FromJson(settings.ToJson());
++            Assert.That(loaded.display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingSprite));
++            Assert.That(loaded.display.flyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingSprite));
++        }
++
++        [Test]
++        public void FlyingAmountDefaultsToHighAndMediumSkipsDrumrollsOnly()
++        {
++            var display = new DisplaySettings();
++            Assert.That(display.FlyingAmount, Is.EqualTo(DisplaySettings.FlyingHigh));
++            Assert.That(display.Flies(false) && display.Flies(true), Is.True);
++            Assert.That(GameSettings.FromJson("{\"display\":{\"flyingAmount\":9}}").display.FlyingAmount,
++                Is.EqualTo(DisplaySettings.FlyingHigh));
++            display.flyingAmount = DisplaySettings.FlyingMedium;
++            Assert.That(display.Flies(false), Is.True);
++            Assert.That(display.Flies(true), Is.False);
++            display.flyingAmount = DisplaySettings.FlyingLow;
++            Assert.That(display.Flies(false) || display.Flies(true), Is.False);
++            var saved = new GameSettings();
++            saved.display.flyingAmount = DisplaySettings.FlyingLow;
++            Assert.That(GameSettings.FromJson(saved.ToJson()).display.FlyingAmount, Is.EqualTo(DisplaySettings.FlyingLow));
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta
+new file mode 100644
+index 0000000..7b2bc9e
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: fe77c2121f7447f1afad1e8958db82ca
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs
+new file mode 100644
+index 0000000..d9cbd1a
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs
+@@ -0,0 +1,37 @@
++using System.IO;
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class GamePathsTests
++    {
++        const string Data = "/Game/OurTaikoPlay.app/Contents";
++        const string Persistent = "/Users/player/Library/Application Support/Other";
++        const string Home = "/Users/player";
++
++        [Test]
++        public void MacStandaloneUsesApplicationSupportAndKeepsSongsUnderIt()
++        {
++            string root = GamePaths.ChooseRoot(false, true, true, Data, Persistent, Home, _ => true);
++            Assert.That(root, Is.EqualTo(Path.GetFullPath(Path.Combine(
++                Home, "Library", "Application Support", "OurTaiko", "OurTaikoPlay"))));
++            Assert.That(GamePaths.SongsDirectory(root), Is.EqualTo(Path.Combine(root, "Songs")));
++            Assert.That(GamePaths.ChooseRoot(false, true, true, Data, Persistent, Home, _ => false), Is.EqualTo(root));
++        }
++
++        [Test]
++        public void WindowsAndLinuxStayBesideTheExecutableWhenItIsWritable()
++        {
++            string beside = Path.GetFullPath(Path.Combine(Data, ".."));
++            Assert.That(GamePaths.ChooseRoot(false, true, false, Data, Persistent, Home, _ => true), Is.EqualTo(beside));
++            Assert.That(GamePaths.ChooseRoot(false, true, false, Data, Persistent, Home, _ => false), Is.EqualTo(Persistent));
++        }
++
++        [Test]
++        public void EditorAndMobileKeepThePersistentPath()
++        {
++            Assert.That(GamePaths.ChooseRoot(true, true, true, Data, Persistent, Home, _ => true), Is.EqualTo(Persistent));
++            Assert.That(GamePaths.ChooseRoot(false, false, false, Data, Persistent, Home, _ => true), Is.EqualTo(Persistent));
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta
+new file mode 100644
+index 0000000..4e88931
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 87de5235d17c44ce95583b78a025a179
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs
+new file mode 100644
+index 0000000..c276980
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs
+@@ -0,0 +1,78 @@
++using System.IO;
++using System.Linq;
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class MacPlayerDataTests
++    {
++        string source, destination;
++
++        [SetUp]
++        public void SetUp()
++        {
++            string id = System.Guid.NewGuid().ToString("N");
++            source = Path.Combine(UnityEngine.Application.temporaryCachePath, "mac-src-" + id);
++            destination = Path.Combine(UnityEngine.Application.temporaryCachePath, "mac-dst-" + id);
++            Directory.CreateDirectory(Path.Combine(source, "Contents", "MacOS"));
++            File.WriteAllText(Path.Combine(source, "Contents", "Info.plist"), "bundle");
++            File.WriteAllBytes(Path.Combine(source, "Contents", "MacOS", "OurTaikoPlay"), new byte[] { 1, 2, 3 });
++        }
++
++        [TearDown]
++        public void TearDown()
++        {
++            if (Directory.Exists(source)) Directory.Delete(source, true);
++            if (Directory.Exists(destination)) Directory.Delete(destination, true);
++        }
++
++        [Test]
++        public void CopiesSongsIntoAnEmptyDestinationAndLeavesTheAppBundle()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs", "Pack"));
++            File.WriteAllText(Path.Combine(source, "Songs", "Pack", "song.tja"), "TITLE:One");
++            File.WriteAllText(Path.Combine(source, "settings.json"), "{\"general\":{}}");
++            Directory.CreateDirectory(destination);
++            MacPlayerData.CopyMissing(source, destination);
++
++            Assert.That(File.ReadAllText(Path.Combine(destination, "Songs", "Pack", "song.tja")), Is.EqualTo("TITLE:One"));
++            Assert.That(File.ReadAllText(Path.Combine(destination, "settings.json")), Is.EqualTo("{\"general\":{}}"));
++            Assert.That(File.ReadAllText(Path.Combine(source, "Songs", "Pack", "song.tja")), Is.EqualTo("TITLE:One"));
++            Assert.That(Directory.Exists(Path.Combine(destination, "Contents")), Is.False);
++            Assert.That(File.Exists(Path.Combine(destination, "OurTaikoPlay")), Is.False);
++        }
++
++        [Test]
++        public void FillsAnEmptySongsDirectory()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "chart");
++            Directory.CreateDirectory(Path.Combine(destination, "Songs"));
++            MacPlayerData.CopyMissing(source, destination);
++            Assert.That(File.ReadAllText(Path.Combine(destination, "Songs", "a.tja")), Is.EqualTo("chart"));
++        }
++
++        [Test]
++        public void DoesNotOverwriteANonEmptyDestination()
++        {
++            File.WriteAllText(Path.Combine(source, "settings.json"), "old");
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "old chart");
++            Directory.CreateDirectory(Path.Combine(destination, "Songs"));
++            File.WriteAllText(Path.Combine(destination, "Songs", "kept.tja"), "kept");
++            File.WriteAllText(Path.Combine(destination, "settings.json"), "kept settings");
++            MacPlayerData.CopyMissing(source, destination);
++            Assert.That(File.ReadAllText(Path.Combine(destination, "settings.json")), Is.EqualTo("kept settings"));
++            Assert.That(Directory.GetFiles(Path.Combine(destination, "Songs")).Select(Path.GetFileName), Is.EqualTo(new[] { "kept.tja" }));
++        }
++
++        [Test]
++        public void ACopyFailureDoesNotThrow()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "chart");
++            Assert.DoesNotThrow(() => MacPlayerData.CopyMissing(source, Path.Combine(destination, "\0bad")));
++            Assert.That(File.Exists(Path.Combine(source, "Songs", "a.tja")), Is.True);
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta
+new file mode 100644
+index 0000000..4980a18
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 636401230eed4c7ea1fa65097f3acdfe
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/EditMode/SoundSettingsTests.cs b/Assets/OurTaiko/Tests/EditMode/SoundSettingsTests.cs
+index de04491..123d8ea 100644
+--- a/Assets/OurTaiko/Tests/EditMode/SoundSettingsTests.cs
++++ b/Assets/OurTaiko/Tests/EditMode/SoundSettingsTests.cs
+@@ -36,6 +36,30 @@ public void SoundMenuOffersVolumesAndPlatformSupportedBackends(SoundPlatform pla
+             Assert.That(backend.Choices, Is.EqualTo(platform == SoundPlatform.Windows
+                 ? new[] { "Automatic", "BassWASAPI", "BassASIO", "BassSimple" } : new[] { "Automatic", "BassSimple" }));
+         }
++        [TestCase("zh")]
++        [TestCase("zh_tw")]
++        [TestCase("ja")]
++        [TestCase("ko")]
++        public void SoundRowsAreTranslatedForEveryDescriptor(string language)
++        {
++            var rows = SoundSettings.Catalog(SoundPlatform.Desktop, AudioBackend.BassSimple, language);
++            foreach (var row in rows)
++                Assert.That(row.Label, Does.Not.EqualTo("Master Volume"), row.Label);
++            Assert.That(rows[0].Label, Is.Not.EqualTo("Master Volume"));
++            // The sentence built from two parts carries both translations.
++            var period = rows.Single(r => r.Label.Contains("周期") || r.Label.Contains("週期") || r.Label.Contains("주기"));
++            Assert.That(period.Description, Does.Not.Contain("Applies"));
++            Assert.That(period.Description, Does.Not.Contain("Shorter periods"));
++        }
++
++        [Test]
++        public void SoundRowsStayEnglishByDefaultSoMenuKeysDoNotMove()
++        {
++            var rows = SoundSettings.Catalog(SoundPlatform.Desktop, AudioBackend.BassSimple, "en");
++            Assert.That(rows[0].Label, Is.EqualTo("Master Volume"));
++            Assert.That(rows[0].Description, Is.EqualTo("Overall volume. Applies immediately; 0% mutes this group."));
++        }
++
+         [Test]
+         public void BackendChangesPreserveAdvancedConfiguration()
+         {
+diff --git a/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs b/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs
+new file mode 100644
+index 0000000..dddf205
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs
+@@ -0,0 +1,41 @@
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class UiTextTests
++    {
++        const string Chart = "TITLE:Base title\nTITLEEN:English title\nTITLEJA:日本語の曲名\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1000,\n#END";
++
++        [Test]
++        public void SettingsUseTheSelectedLanguageAndFallBackToEnglish()
++        {
++            Assert.That(UiText.Settings("Language", "zh"), Is.EqualTo("语言"));
++            Assert.That(UiText.Settings("Language", "ko"), Is.EqualTo("언어"));
++            Assert.That(UiText.Settings("Language", "en"), Is.EqualTo("Language"));
++            Assert.That(UiText.Settings("Not in the table", "zh"), Is.EqualTo("Not in the table"));
++        }
++
++        [Test]
++        public void SettingsHeadingAndEntryBoardsFollowTheLanguage()
++        {
++            Assert.That(UiText.InGame("ゲーム設定", "zh"), Is.EqualTo("游戏设置"));
++            Assert.That(UiText.InGame("ゲーム設定", "zh_tw"), Is.EqualTo("遊戲設定"));
++            Assert.That(UiText.InGame("ゲーム設定", "ja"), Is.EqualTo("ゲーム設定"));
++            Assert.That(UiText.InGame("演奏ゲーム", "zh"), Is.EqualTo("演奏游戏"));
++            Assert.That(UiText.InGame("段位道場", "zh"), Is.EqualTo("段位道场"));
++        }
++
++        [Test]
++        public void InGameUsesJapaneseForEnglishAndKoreanAndKeepsSongTitlesSeparate()
++        {
++            Assert.That(UiText.InGameLanguage("en"), Is.EqualTo("ja"));
++            Assert.That(UiText.InGameLanguage("ko"), Is.EqualTo("ja"));
++            Assert.That(UiText.InGame("返回选曲", "zh_tw"), Is.EqualTo("返回選曲"));
++            Assert.That(UiText.InGame("返回选曲", "en"), Is.EqualTo("曲選択にもどる"));
++            Assert.That(UiText.InGame("返回选曲", "zh"), Is.EqualTo("返回选曲"));
++            Assert.That(UiText.InGame("Missing sentence", "zh"), Is.EqualTo("Missing sentence"));
++            Assert.That(SongInfo.Read(Chart, "en").Title, Is.EqualTo("English title"));
++            Assert.That(UiText.InGame("Resume", "en"), Is.EqualTo("再開"));
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs.meta
+new file mode 100644
+index 0000000..c6939d3
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/UiTextTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 2802d3ceb846452a9f5fee09d26f973a
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/Finished/EditMode/SettingsMenuTests.cs b/Assets/OurTaiko/Tests/Finished/EditMode/SettingsMenuTests.cs
+index 8a567be..f775515 100644
+--- a/Assets/OurTaiko/Tests/Finished/EditMode/SettingsMenuTests.cs
++++ b/Assets/OurTaiko/Tests/Finished/EditMode/SettingsMenuTests.cs
+@@ -149,7 +149,7 @@ public void VSyncIsADisplayToggleOffByDefault()
+             var menu = Menu();
+             menu.Ka(1); menu.Don(); menu.Ka(1);
+             Assert.That(menu.CurrentItem.Label, Is.EqualTo("VSync"));
+-            Assert.That(menu.ItemCount, Is.EqualTo(5), "Target Frame Rate, VSync, Background Movie, Lane Opacity with Movie and Return.");
++            Assert.That(menu.ItemCount, Is.EqualTo(7), "Target Frame Rate, VSync, Background Movie, Lane Opacity with Movie, Flying Notes, Flying Amount and Return.");
+             menu.Don();
+             Assert.That(menu.CurrentItem.Choices, Is.EqualTo(new[] { "Enabled", "Disabled" }));
+             Assert.That(menu.ChoiceIndex, Is.EqualTo(1), "Disabled is the default.");
+diff --git a/Assets/OurTaiko/Tests/Finished/PlayMode/GlobalSettingFlowTests.cs b/Assets/OurTaiko/Tests/Finished/PlayMode/GlobalSettingFlowTests.cs
+index 5c677ff..48479ed 100644
+--- a/Assets/OurTaiko/Tests/Finished/PlayMode/GlobalSettingFlowTests.cs
++++ b/Assets/OurTaiko/Tests/Finished/PlayMode/GlobalSettingFlowTests.cs
+@@ -162,12 +162,20 @@ public IEnumerator EntrySettingsBoardOpensTheSettingsAndDrumKeysChangeTheDrumPad
+                 scene.Don();
+                 view.choiceRows[1].click.Clicked();
+                 Assert.That(QualitySettings.vSyncCount, Is.Zero);
+-                // Display › Background Movie and its lane opacity follow.
++                // Display › Background Movie, lane opacity and the flying-note drawing that follow.
++                scene.Ka(1);
+                 Assert.That(view.itemRows[2].label.text, Is.EqualTo("Background Movie"));
+                 Assert.That(view.itemRows[2].value.text, Is.EqualTo("Enabled"));
++                scene.Ka(1);
+                 Assert.That(view.itemRows[3].label.text, Is.EqualTo("Lane Opacity with Movie"));
+                 Assert.That(view.itemRows[3].value.text, Is.EqualTo("40 %"));
+-                scene.Ka(3);
++                scene.Ka(1);
++                Assert.That(view.itemRows[4].label.text, Is.EqualTo("Flying Notes"));
++                Assert.That(view.itemRows[4].value.text, Is.EqualTo("Images"));
++                scene.Ka(1);
++                Assert.That(view.itemRows[5].label.text, Is.EqualTo("Flying Amount"));
++                Assert.That(view.itemRows[5].value.text, Is.EqualTo("High"));
++                scene.Ka(1);
+                 scene.Don();
+                 Assert.That(menu.Focus, Is.EqualTo(SettingsFocus.Types));
+                 scene.Ka(3);
+diff --git a/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs b/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs
+new file mode 100644
+index 0000000..69a1c05
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs
+@@ -0,0 +1,50 @@
++using System.Collections;
++using NUnit.Framework;
++using UnityEngine;
++using UnityEngine.TestTools;
++
++namespace OurTaiko.Tests
++{
++    public sealed class NoteArcDrawModeTests
++    {
++        [UnityTest]
++        public IEnumerator SpriteModeDrawsFlyingNotesWithoutInterfaceImages()
++        {
++            var manager = SettingManager.EnsureInstance();
++            var previous = manager.Settings.Clone();
++            var sprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f), 100);
++            sprite.name = "ArcNote";
++            NoteArcView arcs = null;
++            try
++            {
++                var settings = previous.Clone();
++                settings.display.flyingNoteDraw = DisplaySettings.FlyingSprite;
++                manager.UseUnsaved(settings);
++                var host = new GameObject("Arcs", typeof(RectTransform));
++                arcs = host.AddComponent<NoteArcView>();
++                arcs.lane = (RectTransform)host.transform;
++                arcs.Spawn(sprite, false, 0);
++                arcs.Spawn(sprite, true, 0.01);
++                Assert.That(arcs.ActiveCount, Is.EqualTo(2));
++                for (int i = 0; i < arcs.ActiveCount; i++)
++                {
++                    Assert.That(arcs.ArcRoot(i).GetComponent<UnityEngine.UI.Image>(), Is.Null);
++                    Assert.That(arcs.ArcRoot(i).GetComponentInChildren<SpriteRenderer>(), Is.Not.Null);
++                    Assert.That(arcs.ArcRoot(i).GetComponent<LaneSprite>().sprite, Is.EqualTo(sprite));
++                }
++                settings.display.flyingNoteDraw = DisplaySettings.FlyingCurrent;
++                manager.UseUnsaved(settings);
++                arcs.Spawn(sprite, false, 0.02);
++                Assert.That(arcs.ArcRoot(2).GetComponent<UnityEngine.UI.Image>(), Is.Not.Null);
++                Assert.That(arcs.ArcRoot(2).GetComponent<UnityEngine.UI.Image>().sprite, Is.EqualTo(sprite));
++                yield return null;
++            }
++            finally
++            {
++                manager.UseUnsaved(previous);
++                if (arcs != null) Object.Destroy(arcs.gameObject);
++                Object.Destroy(sprite);
++            }
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs.meta b/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs.meta
+new file mode 100644
+index 0000000..9a088ae
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/NoteArcDrawModeTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: b684bdaed7e049048c97c4487a84344b
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs
+new file mode 100644
+index 0000000..1822fb9
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs
+@@ -0,0 +1,44 @@
++using System.Collections;
++using NUnit.Framework;
++using UnityEngine;
++using UnityEngine.TestTools;
++
++namespace OurTaiko.Tests
++{
++    public sealed class ResultLanguageFlowTests
++    {
++        [UnityTest]
++        public IEnumerator TraditionalChineseReplacesTheHardcodedResultLabel()
++        {
++            var manager = SettingManager.EnsureInstance();
++            var previous = manager.Settings.Clone();
++            GameObject host = null;
++            try
++            {
++                var settings = previous.Clone();
++                settings.general.language = "zh_tw";
++                manager.UseUnsaved(settings);
++                host = new GameObject("ResultLanguage", typeof(Canvas));
++                var labelObject = new GameObject("Action", typeof(RectTransform));
++                labelObject.transform.SetParent(host.transform, false);
++                var label = labelObject.AddComponent<TMPro.TextMeshProUGUI>();
++                var view = host.AddComponent<ResultAnalysisView>();
++                view.actionLabel = label;
++                view.SetReady(true);
++                Assert.That(label.text, Is.EqualTo("返回選曲"));
++                settings.general.language = "en";
++                manager.UseUnsaved(settings);
++                view.SetReady(true);
++                Assert.That(label.text, Is.EqualTo("曲選択にもどる"));
++                Assert.That(SongInfo.Read("TITLE:English title\nTITLEJA:日本語\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1000,\n#END", "en").Title,
++                    Is.EqualTo("English title"));
++                yield return null;
++            }
++            finally
++            {
++                manager.UseUnsaved(previous);
++                if (host != null) Object.Destroy(host);
++            }
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta
+new file mode 100644
+index 0000000..d9223d6
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 0ab29eab53be4abe9b4b82b707b65dfe
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs b/Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs
+index 30e3190..c8b49c5 100644
+--- a/Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs
++++ b/Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs
+@@ -35,7 +35,8 @@ public IEnumerator LanguageMenuPersistsAndSongNamesUseTheChosenTranslationThroug
+                 scene.view.choiceRows[2].click.Clicked();
+                 Assert.That(settings.Settings.general.language, Is.EqualTo("ko"));
+                 Assert.That(GameSettings.FromJson(File.ReadAllText(path)).general.language, Is.EqualTo("ko"));
+-                Assert.That(scene.view.itemRows[0].label.text, Is.EqualTo("Language"), "The interface is not translated.");
++                Assert.That(scene.view.itemRows[0].label.text, Is.EqualTo("언어"));
++                Assert.That(UiText.InGame("Resume"), Is.EqualTo("再開"), "English and Korean use Japanese outside Settings.");
+                 Assert.That(song.ReadDisplayInfo().Title, Is.EqualTo("Korean title"));
+                 Assert.That(song.ReadDisplayInfo().Subtitle, Is.EqualTo("Base subtitle"), "Missing translations use the original, not Japanese.");
+                 Assert.That(song.ReadInfo().Title, Is.EqualTo("Base"));
+diff --git a/README.en.md b/README.en.md
+index 3c634a4..3ffce05 100644
+--- a/README.en.md
++++ b/README.en.md
+@@ -69,7 +69,7 @@ Songs (`Songs/`), settings, scores, and caches share one data folder:
+ | Platform | Data folder |
+ | --- | --- |
+ | Windows / Linux | The folder containing the game executable |
+-| macOS | Inside `OurTaikoPlay.app` (right-click → Show Package Contents) |
++| macOS player | `~/Library/Application Support/OurTaiko/OurTaikoPlay/` (`Songs` inside it). Existing data is copied out of the `.app`; the old files are left in place |
+ | iOS / iPadOS | Files app → On My iPad / iPhone → OurTaikoPlay |
+ | Android, Unity Editor | `Application.persistentDataPath` |
+ 
+@@ -84,7 +84,7 @@ If the desktop game folder is read-only (for example a macOS app still in its do
+ | `servers.json` | Online server and login configuration |
+ | `scores.sqlite3` | Local best scores and pending uploads separated by server / account |
+ 
+-General → Language currently changes song titles and subtitles only, falling back to the chart's own TITLE / SUBTITLE when a translation is missing. Full menu localization is not yet available. README translations are independent of the in-game language setting.
++General → Language changes the settings menu (English, Japanese, Simplified Chinese, Traditional Chinese, and Korean) and in-game text (Japanese, Simplified, and Traditional; English and Korean use Japanese outside Settings). Song titles and subtitles still use the chart's own translation, falling back to the original TITLE/SUBTITLE. README translations are independent of the in-game language setting.
+ 
+ ## Build
+ 
+diff --git a/README.ja.md b/README.ja.md
+index 6295784..1759561 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -69,7 +69,7 @@ git submodule update --init --recursive
+ | プラットフォーム | データフォルダー |
+ | --- | --- |
+ | Windows／Linux | ゲームの実行ファイルがあるフォルダー |
+-| macOS | `OurTaikoPlay.app` の中（右クリック →「パッケージの内容を表示」） |
++| macOS プレイヤー | `~/Library/Application Support/OurTaiko/OurTaikoPlay/`（曲は中の `Songs`）。既存のデータは `.app` からコピーされ、古いファイルは削除されません |
+ | iOS／iPadOS | 「ファイル」App →「この iPad／iPhone 内」→ OurTaikoPlay |
+ | Android、Unity Editor | `Application.persistentDataPath` |
+ 
+@@ -84,7 +84,7 @@ git submodule update --init --recursive
+ | `servers.json` | オンラインサーバーとログインの設定 |
+ | `scores.sqlite3` | ローカル自己ベストと、サーバー・アカウント別の送信待ちキュー |
+ 
+-General → Language は現在、曲名とサブタイトルにのみ適用されます。翻訳がない場合は譜面の TITLE／SUBTITLE をそのまま表示します。メニュー全体の翻訳にはまだ対応していません。README の言語別ページはゲーム内の言語設定とは別です。
++General → Language は設定メニュー（英語、日本語、簡体字、繁体字、韓国語）とゲーム内の文字（日本語、簡体字、繁体字。英語と韓国語のときは設定以外を日本語）を切り替えます。曲名とサブタイトルは譜面自身の訳を使い、ない場合は原文（TITLE／SUBTITLE）です。README の言語別ページはゲーム内の言語設定とは別です。
+ 
+ ## ビルド
+ 
+diff --git a/README.md b/README.md
+index 538a253..0b48dc2 100644
+--- a/README.md
++++ b/README.md
+@@ -75,7 +75,7 @@ Entry 的「ゲーム設定」可进入系统设置。
+ | 平台 | 数据目录 |
+ | --- | --- |
+ | Windows／Linux | 游戏可执行文件所在目录 |
+-| macOS | `OurTaikoPlay.app` 内（右键「显示包内容」） |
++| macOS 正式版 | `~/Library/Application Support/OurTaiko/OurTaikoPlay/`（歌曲在其中的 `Songs`）。已有数据会从 `.app` 包内复制过来，旧文件不会删除 |
+ | iOS／iPadOS | 「文件」App →「我的 iPad／iPhone」→ OurTaikoPlay |
+ | Android、Unity Editor | `Application.persistentDataPath` |
+ 
+@@ -90,7 +90,7 @@ Entry 的「ゲーム設定」可进入系统设置。
+ | `servers.json` | 在线服务器与登录配置 |
+ | `scores.sqlite3` | 本地最佳成绩，以及按服务器／账号隔离的待上传队列 |
+ 
+-General → Language 当前只影响歌名和副标题，缺失翻译时显示谱面原文（TITLE／SUBTITLE）；尚不提供整套菜单翻译。README 的语言版本与游戏内语言设置相互独立。
++General → Language 会切换设置菜单（英文、日文、简体、繁体、韩文）以及游戏内文字（日文、简体、繁体；选英文或韩文时游戏内用日文）。歌名和副标题仍按谱面自己的译文显示，缺失时用原文（TITLE／SUBTITLE）。README 的语言版本与游戏内语言设置相互独立。
+ 
+ ## 构建
+ 
+diff --git a/openspec/changes/archive/.gitkeep b/openspec/changes/archive/.gitkeep
+new file mode 100644
+index 0000000..e69de29
+diff --git a/openspec/changes/play-preferences/.openspec.yaml b/openspec/changes/play-preferences/.openspec.yaml
+new file mode 100644
+index 0000000..a216797
+--- /dev/null
++++ b/openspec/changes/play-preferences/.openspec.yaml
+@@ -0,0 +1,2 @@
++schema: spec-driven
++created: 2026-10-15
+diff --git a/openspec/changes/play-preferences/design.md b/openspec/changes/play-preferences/design.md
+new file mode 100644
+index 0000000..8d2c166
+--- /dev/null
++++ b/openspec/changes/play-preferences/design.md
+@@ -0,0 +1,70 @@
++# Design
++
++## Context
++
++见 `proposal.md` 的 Why。当前 `GamePaths.Resolve` 在 macOS 正式版把数据根放在 `Application.dataPath` 的上一级，也就是 `OurTaikoPlay.app` 包根；歌曲是其下的 `Songs`。包根里同时有 `Contents` 和应用本体。编辑器、Android 走 `Application.persistentDataPath`。Windows 和 Linux 在可写时用可执行文件旁边的目录。
++
++语言码已经是 `en`、`ja`、`zh`、`zh_tw`、`ko`，但只进入歌名和副标题。设置菜单的句子在 `SettingsMenu` 里写成英文。结算分析和练习里有一批写死的简体。
++
++飞出音符由 `NoteArcView` 用界面 `Image` 绘制，每帧改 `anchoredPosition`。谱面音符已经改成 `LaneSprite`（`SpriteRenderer`），移动时只改变换。`OurTaikoView_Web` 的 `NoteArcView` 与这边相同，谱面音符仍是界面图片。
++
++## Goals / Non-Goals
++
++**Goals:**
++
++- macOS 正式版的数据根固定为 `~/Library/Application Support/OurTaiko/OurTaikoPlay/`，并只迁移列出的玩家数据。
++- 用一份译文表覆盖设置菜单和游戏内文字，调用处保留现在的原文作键。
++- 飞出音符的两档共用 `NoteArcPath` 和现有的生成条件；差别只在用界面图片还是精灵。
++
++**Non-Goals:**
++
++- 不改 Windows、Linux、iOS、Android 和编辑器的路径代码。
++- 不翻译 README，不改歌名的现有回退规则。
++- 不提供中档或低档，不减少飞出数量，不改判定圈、打击脸和鼓面闪光。
++- 不把「现在」档改成精灵绘制。
++
++## Decisions
++
++### macOS 路径只改正式版的根目录
++
++在 `UNITY_STANDALONE_OSX && !UNITY_EDITOR` 时，`GamePaths.Resolve` 直接返回 `~/Library/Application Support/OurTaiko/OurTaikoPlay`，不再先试 `.app` 包根。目录用该固定路径，不用包名 `com.DefaultCompany.2D-URP`。`Songs` 仍是 `GamePaths.Root/Songs`。
++
++备选是所有桌面平台都改用 `persistentDataPath`。未采用，因为 Windows 和 Linux 的现有位置要保持不变。
++
++### 复制清单，且先于创建空的 Songs
++
++启动时、`LocalSongLibrary` 创建 `Songs` 之前，从旧包根复制。旧包根是 `Contents` 的上一级。清单是 `Songs`、`cache`、`settings.json`、`options.json`、`player.json`、`servers.json`、`scores.sqlite3`。目标已存在且非空则跳过；空的 `Songs` 仍可接收复制。复制用文件复制，不移动、不删除。失败只记警告。
++
++备选是整份复制包根。未采用，因为包根包含 `Contents` 和可执行文件。
++
++### 译文表按原文查找
++
++新增译文表，键是调用处现在的句子。设置菜单用语言码本身。游戏内先把 `en` 和 `ko` 映射到 `ja`，再查表。歌名和副标题不经过这张表。结算和练习里的简体现有句子也作为键，补上日文、简体和繁体。
++
++备选是把每种语言写成另一套完整界面。未采用，因为上游改一句时会在多处冲突。调用处仍写原文，冲突集中在译文表。
++
++### 绘制档位放在显示设置
++
++`DisplaySettings` 增加一个整数字段，缺省和无法识别的值都是 0（现在）。1 是精灵。`GameSettings.FromJson` 已有的缺字段默认行为继续适用。选项加在显示分类，标签本身走设置菜单译文。
++
++`NoteArcView` 按该字段选择对象池。现在档保持现有 `Image` 池。精灵档复用 `LaneSprite` 的材质和矩形适配，父对象不挂会随位置重画的界面图形；位置仍由 `NoteArcPath` 计算。两档的生成条件留在 `PlayScene.SpawnArc`。到达魂槽后的爆点效果不改。
++
++备选是三档都用精灵，或用数量上限代替画法。未采用，因为玩家要求默认保持今天的界面图片，并保留一档可切回。
++
++### 改动落点
++
++新文件放数据迁移、译文表和飞出音符的精灵池。现有文件只在 `GamePaths`、启动顺序、`DisplaySettings`、`SettingsMenu`、`NoteArcView` 和玩家可见文字的取值点修改。
++
++## Risks / Trade-offs
++
++- [Mac 上编辑器的 `persistentDataPath` 与新正式版目录相同] → 编辑器代码不改。迁移不覆盖已有非空文件，因此编辑器里已有的设置会留下来；空的 `Songs` 仍可从 `.app` 补上。
++- [精灵飞出音符的遮挡顺序与界面图片不同] → 排序对齐谱面音符和魂槽爆点，并用现有飞出音符测试核对路线和到达结果。
++- [译文漏句] → 缺译文时设置回英文，游戏内先日文、再回原文。测试覆盖结算里现在的简体句子和英文、韩文的游戏内回退。
++- [上游合并时文字调用点冲突] → 原文留在调用处，新句子补进译文表，不在上游文件里展开五种语言。
++
++## Migration Plan
++
++1. 先改变 macOS 正式版的读取位置，再做一次性复制。
++2. 不删除 `.app` 内的旧数据。玩家确认新目录无误前，旧文件仍在。
++3. 绘制档位默认是「现在」。回退该功能时把字段忽略即可，旧设置文件仍然有效。
++4. 若要撤销数据目录改动，恢复 `GamePaths` 的旧规则；已经复制到 Application Support 的文件留在原地，不自动搬回。
+diff --git a/openspec/changes/play-preferences/proposal.md b/openspec/changes/play-preferences/proposal.md
+new file mode 100644
+index 0000000..9f9b702
+--- /dev/null
++++ b/openspec/changes/play-preferences/proposal.md
+@@ -0,0 +1,34 @@
++# Proposal
++
++## Why
++
++macOS 正式版把歌曲和存档放在 `.app` 包内，换构建时容易丢掉，也不便查找。语言设置目前只改歌名，设置和游戏内文字不会跟着切换。击打后飞出的音符用界面图片绘制，连打变多时会重画整块画面并掉帧；网页版同一段飞行代码更顺，是因为桌面版后来的绘制方式更重。
++
++## What Changes
++
++- macOS 正式版的数据根目录改为 `~/Library/Application Support/OurTaiko/OurTaikoPlay/`。歌曲、设置、成绩和缓存都在这个目录，歌曲位于其中的 `Songs`。Windows、Linux、iOS、Android 和编辑器的数据位置不变。
++- 首次在 macOS 上使用新目录时，若新目录还没有玩家数据、旧的 `.app` 数据目录里有，则把旧目录中的玩家数据复制过来，不删除旧文件。
++- 设置菜单按当前语言显示英文、日文、简体中文、繁体中文或韩文。
++- 游戏内玩家可见文字（入口、选曲、演奏、暂停、结算）只提供日文、简体中文和繁体中文。语言为英文或韩文时，这些画面使用日文。歌名和副标题仍按现有语言设置显示，五种语言都保留。
++- 显示设置增加飞出音符绘制方式，两档。默认「现在」：沿用界面图片，每击都飞。另一档「精灵」：用精灵绘制，每击都飞。判定圈和鼓面闪光不随此选项改变。
++
++## Capabilities
++
++### New Capabilities
++
++- `macos-user-data`: macOS 正式版的数据根目录、其下的 `Songs`，以及从旧 `.app` 位置复制已有数据。
++- `interface-language`: 设置菜单与游戏内画面的语言覆盖范围，以及英文、韩文在游戏内回退到日文。
++- `flying-note-draw`: 显示设置中的飞出音符绘制档位，以及默认保持当前画法。
++
++### Modified Capabilities
++
++- 无。仓库里还没有已发布的 OpenSpec 能力。
++
++## Impact
++
++- `GamePaths` 在 macOS 正式版上的根目录，以及 `LocalSongLibrary` 使用的 `Songs` 路径。
++- `settings.json` 增加飞出音符绘制档位；缺省字段保持「现在」。
++- 设置菜单、入口、选曲、演奏、暂停和结算中的玩家可见文字。结算和练习里已经写死的简体句子改为按语言取值。
++- `NoteArcView` 的绘制。谱面音符已经使用的精灵绘制可复用，飞出音符在「精灵」档才走这条路径。
++- 相关编辑模式和播放模式测试，以及 README 中 macOS 数据目录的说明。
++- 改动应集中在数据路径、译文表和飞出音符绘制这几处，避免散改上游界面逻辑，以便继续合并 `OurTaiko/OurTaikoPlay`。
+diff --git a/openspec/changes/play-preferences/specs/flying-note-draw/spec.md b/openspec/changes/play-preferences/specs/flying-note-draw/spec.md
+new file mode 100644
+index 0000000..d66a83d
+--- /dev/null
++++ b/openspec/changes/play-preferences/specs/flying-note-draw/spec.md
+@@ -0,0 +1,53 @@
++# Spec Delta
++
++## Purpose
++
++规定显示设置里的飞出音符绘制档位：默认保持现在的界面图片画法，另一档改为精灵绘制且仍然每击都飞。
++
++## ADDED Requirements
++
++### Requirement: Display setting has two draw modes
++
++显示设置 SHALL 提供飞出音符绘制方式，且只有两档：「现在」和「精灵」。新的设置以及无法识别的已保存值 SHALL 使用「现在」。玩家的选择 SHALL 写入设置文件，并在下次启动后保持。
++
++#### Scenario: Default is the current drawing
++
++- **WHEN** 玩家从未改过该选项，或设置文件中没有该字段
++- **THEN** 飞出音符使用「现在」档
++
++#### Scenario: Choice persists
++
++- **WHEN** 玩家把该选项改为「精灵」并重新启动游戏
++- **THEN** 该选项仍是「精灵」
++
++### Requirement: Current mode matches today's flying notes
++
++「现在」档 SHALL 让良、可、连打的每一击，以及打完的气球，各飞出一颗音符，绘制方式与今天的界面图片相同。连打密集时允许出现与今天相同的掉帧。飞行路线、音符图和到达魂槽的结果 SHALL 与今天一致。
++
++#### Scenario: Roll hits still fly
++
++- **WHEN** 绘制方式为「现在」，玩家在连打中连续击打
++- **THEN** 每一次击打都飞出一颗音符
++
++### Requirement: Sprite mode flies every hit without interface redraw
++
++「精灵」档 SHALL 让与「现在」档相同的击打各飞出一颗音符，并使用与谱面音符相同的精灵绘制。移动这些音符时，系统 SHALL NOT 因为它们的位置变化而重画周围界面。飞行路线和音符图 SHALL 与「现在」档相同。
++
++#### Scenario: Every hit still flies
++
++- **WHEN** 绘制方式为「精灵」，玩家打出良、可或连打击
++- **THEN** 每一次这类击打都飞出一颗音符
++
++#### Scenario: Dense rolls stay on sprites
++
++- **WHEN** 绘制方式为「精灵」，且同时有多颗音符在飞
++- **THEN** 这些音符以精灵绘制，而不是界面图片
++
++### Requirement: Judgment effects ignore the draw mode
++
++判定圈、打击脸和鼓面闪光 SHALL 在两档中保持今天的表现。该选项 SHALL NOT 减少飞出音符的数量，也 SHALL NOT 关闭上述效果。
++
++#### Scenario: Hit flash stays
++
++- **WHEN** 玩家在任一绘制档击打鼓面
++- **THEN** 鼓面闪光和判定圈仍按今天的方式出现
+diff --git a/openspec/changes/play-preferences/specs/interface-language/spec.md b/openspec/changes/play-preferences/specs/interface-language/spec.md
+new file mode 100644
+index 0000000..b32bd87
+--- /dev/null
++++ b/openspec/changes/play-preferences/specs/interface-language/spec.md
+@@ -0,0 +1,54 @@
++# Spec Delta
++
++## Purpose
++
++规定设置菜单和游戏内画面如何跟随语言设置，并让英文与韩文在游戏内使用日文。
++
++## ADDED Requirements
++
++### Requirement: Settings menu follows every language
++
++设置菜单中的分类名、项目名、说明和可选项 SHALL 按当前语言显示。支持的语言为英文、日文、简体中文、繁体中文和韩文。某一句缺少所选语言的译文时，系统 SHALL 显示该句现在使用的英文。
++
++#### Scenario: Simplified Chinese settings
++
++- **WHEN** 玩家把语言设为简体中文并打开设置菜单
++- **THEN** 菜单分类、项目和说明显示简体中文
++
++#### Scenario: Korean settings
++
++- **WHEN** 玩家把语言设为韩文并打开设置菜单
++- **THEN** 菜单分类、项目和说明显示韩文
++
++#### Scenario: Missing settings translation
++
++- **WHEN** 设置菜单的某一句没有当前语言的译文
++- **THEN** 该句显示现在的英文
++
++### Requirement: In-game text uses Japanese or Chinese
++
++入口、选曲、演奏、暂停和结算中的玩家可见界面文字 SHALL 只使用日文、简体中文或繁体中文。语言为日文时显示日文，为简体中文时显示简体中文，为繁体中文时显示繁体中文。语言为英文或韩文时，这些画面 SHALL 显示日文。结算和练习中现在写死的简体句子 SHALL 同样遵守上述规则。缺少日文、简体或繁体译文时，系统 SHALL 先显示日文；日文也没有时，显示该句现在的原文。
++
++#### Scenario: Traditional Chinese results
++
++- **WHEN** 玩家把语言设为繁体中文并打开结算
++- **THEN** 结算中的界面文字显示繁体中文，包括现在写死为简体的句子
++
++#### Scenario: English uses Japanese in game
++
++- **WHEN** 玩家把语言设为英文并进入入口、选曲、演奏、暂停或结算
++- **THEN** 这些画面的界面文字显示日文
++
++#### Scenario: Korean uses Japanese in game
++
++- **WHEN** 玩家把语言设为韩文并进入演奏
++- **THEN** 演奏画面的界面文字显示日文
++
++### Requirement: Song titles keep the selected language
++
++歌名和副标题 SHALL 继续按当前语言在英文、日文、简体中文、繁体中文和韩文中选择，并保持现有的缺失译文回退。界面文字回退到日文时，歌名 SHALL NOT 因此改用日文。
++
++#### Scenario: English song title stays English
++
++- **WHEN** 语言为英文，且谱面提供了英文歌名
++- **THEN** 选曲和演奏显示该英文歌名，即使周围界面文字是日文
+diff --git a/openspec/changes/play-preferences/specs/macos-user-data/spec.md b/openspec/changes/play-preferences/specs/macos-user-data/spec.md
+new file mode 100644
+index 0000000..bf13d9d
+--- /dev/null
++++ b/openspec/changes/play-preferences/specs/macos-user-data/spec.md
+@@ -0,0 +1,54 @@
++# Spec Delta
++
++## Purpose
++
++规定 macOS 正式版把玩家数据放在用户的 Application Support 目录，并在不删除旧文件的前提下带上 `.app` 里已有的数据。
++
++## ADDED Requirements
++
++### Requirement: macOS standalone data root
++
++macOS 正式版 SHALL 把歌曲、设置、演奏选项、玩家名牌、服务器配置、成绩和缓存放在 `~/Library/Application Support/OurTaiko/OurTaikoPlay/`。歌曲 SHALL 位于该目录下的 `Songs`。玩家首次需要该目录时，系统 SHALL 创建它和 `Songs`。
++
++#### Scenario: Fresh macOS launch
++
++- **WHEN** macOS 正式版启动且新的数据根目录尚不存在
++- **THEN** 系统创建 `~/Library/Application Support/OurTaiko/OurTaikoPlay/Songs`，并从此读写玩家数据
++
++#### Scenario: Songs stay inside the data root
++
++- **WHEN** macOS 正式版扫描本地歌曲
++- **THEN** 默认歌曲目录是数据根目录下的 `Songs`
++
++### Requirement: Other platforms keep their data root
++
++Windows、Linux、iOS、Android 和 Unity 编辑器 SHALL 继续使用各自现有的数据根目录。本变更 SHALL NOT 改变这些平台的路径规则。
++
++#### Scenario: Windows stays beside the executable
++
++- **WHEN** 游戏在 Windows 上运行且可执行文件所在目录可写
++- **THEN** 玩家数据仍写在该目录
++
++#### Scenario: Editor path is unchanged
++
++- **WHEN** 游戏在 Unity 编辑器中运行
++- **THEN** 数据根目录仍是编辑器现有的持久化数据路径
++
++### Requirement: Copy player data out of the app bundle
++
++当新的 macOS 数据根目录缺少某项玩家数据，且旧位置（`.app` 包根，即 `Contents` 的上一级）存在该项时，系统 SHALL 把该项复制到新目录，并 SHALL NOT 删除旧位置的文件。玩家数据仅限 `Songs`、`cache`、`settings.json`、`options.json`、`player.json`、`servers.json` 和 `scores.sqlite3`。系统 SHALL NOT 复制 `Contents`、`MacOS`、`Frameworks`、`PlugIns`、`Resources`、`Info.plist` 或其他应用包内容。已存在且非空的目标 SHALL NOT 被覆盖。空的 `Songs` 目录视为缺少歌曲。复制失败 SHALL NOT 阻止游戏启动。
++
++#### Scenario: Songs move beside an otherwise empty new root
++
++- **WHEN** 新目录没有歌曲，旧的 `.app` 包根下的 `Songs` 里有谱面
++- **THEN** 这些谱面出现在新目录的 `Songs` 中，旧的 `Songs` 仍留在 `.app` 内
++
++#### Scenario: Existing destination is kept
++
++- **WHEN** 新目录的 `settings.json` 已经存在，旧位置也有同名文件
++- **THEN** 新目录中的 `settings.json` 保持不变
++
++#### Scenario: Bundle contents stay out
++
++- **WHEN** 系统从 `.app` 包根复制玩家数据
++- **THEN** 新目录中不出现 `Contents` 或可执行文件
+diff --git a/openspec/changes/play-preferences/tasks.md b/openspec/changes/play-preferences/tasks.md
+new file mode 100644
+index 0000000..d671a0b
+--- /dev/null
++++ b/openspec/changes/play-preferences/tasks.md
+@@ -0,0 +1,23 @@
++# Tasks
++
++## 1. macOS 数据目录
++
++- [x] 1.1 在 macOS 正式版把 `GamePaths` 的根目录改为 `~/Library/Application Support/OurTaiko/OurTaikoPlay`，并确认 `Songs` 仍是其下的子目录。用编辑模式测试验证 Windows、Linux、iOS、Android 和编辑器的路径规则不变。
++- [x] 1.2 在创建空 `Songs` 之前，从 `.app` 包根复制 `Songs`、`cache`、`settings.json`、`options.json`、`player.json`、`servers.json` 和 `scores.sqlite3`。空的目标 `Songs` 可以接收复制；已有非空目标不覆盖；不复制 `Contents` 等应用包内容；不删除源文件；复制失败不阻止启动。用临时目录测试覆盖这四种情况。
++
++## 2. 界面语言
++
++- [x] 2.1 增加按原文查找的译文表，以及游戏内把英文和韩文映射到日文的规则。设置菜单缺译文时回英文，游戏内缺译文时先日文、再回原文。用编辑模式测试验证映射和缺译文回退，并验证歌名仍按所选语言显示。
++- [x] 2.2 让设置菜单的分类、项目、说明和可选项走译文表，覆盖英文、日文、简体、繁体和韩文。更新断言「界面不翻译」的测试，并验证简体和韩文下设置菜单的文字。
++- [x] 2.3 让入口、选曲、演奏、暂停、结算和练习中的玩家可见文字走游戏内语言，包括现在写死的简体结算句子。用播放模式测试验证繁体结算、英文进入游戏内时显示日文，以及英文歌名不被界面回退改掉。
++
++## 3. 飞出音符绘制
++
++- [x] 3.1 在显示设置增加两档绘制方式，缺省和无法识别的保存值都是「现在」，并把选择写入 `settings.json`。用编辑模式测试验证默认值、重启后仍为「精灵」，以及设置菜单中的两个选项。
++- [x] 3.2 「现在」档保持现有界面图片池和 `PlayScene` 的生成条件。用现有飞出音符测试验证良、可、连打和打完的气球仍然每击飞出，路线与到达魂槽的结果不变。
++- [x] 3.3 「精灵」档用 `LaneSprite` 绘制同一批飞出音符，父对象不使用会随位置重画的界面图形，位置仍来自 `NoteArcPath`。用测试验证多颗同时飞行时是精灵而不是界面图片，且判定圈、打击脸和鼓面闪光仍出现。
++
++## 4. 说明与合并检查
++
++- [x] 4.1 更新 README 的 macOS 数据目录说明，写明 Application Support 路径和不会删除 `.app` 内旧文件。对照 README 中英日三份的数据目录表，确认只有 macOS 正式版的位置改变。
++- [ ] 4.2 跑相关编辑模式和播放模式测试，并检查相对上游的差异集中在数据路径、译文表和飞出音符绘制。差异落到无关界面逻辑时，把译文收回译文表后再视为完成。
+diff --git a/openspec/config.yaml b/openspec/config.yaml
+new file mode 100644
+index 0000000..52acdde
+--- /dev/null
++++ b/openspec/config.yaml
+@@ -0,0 +1,28 @@
++schema: spec-driven
++
++context: |
++  Language: zh
++  All artifacts must be written in zh.
++  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
++
++# Per-artifact rules (optional)
++# Add custom rules for specific artifacts.
++# Example:
++#   rules:
++#     proposal:
++#       - Keep proposals under 500 words
++#       - Always include a "Non-goals" section
++#     tasks:
++#       - Break tasks into chunks of max 2 hours
++
++# Per-operation guidance (optional)
++# Add advisory guidance for how apply and archive work should be conducted.
++# This is separate from artifact rules above.
++# Example:
++#   operations:
++#     apply:
++#       guidance:
++#         - Keep test summaries concise
++#     archive:
++#       guidance:
++#         - Summarize the archive outcome before finishing
+diff --git a/openspec/specs/.gitkeep b/openspec/specs/.gitkeep
+new file mode 100644
+index 0000000..e69de29

@@ -1,0 +1,7 @@
+.DS_Store
+tools/build/
+tools/fieldcheck/bin/
+tools/fieldcheck/obj/
+backup/*.dll
+backup/app-support/
+backup/app-bundle-settings.json

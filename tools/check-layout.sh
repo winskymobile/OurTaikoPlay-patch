@@ -13,5 +13,9 @@ NEW=${2:-$HERE/build/OurTaiko.Runtime.dll}
 [ -f "$ORIG" ] || { echo "no original dll at $ORIG" >&2; exit 1; }
 [ -f "$NEW" ] || { echo "no built dll at $NEW (run build-runtime-dll.sh first)" >&2; exit 1; }
 
+# dotnet runs from tools/fieldcheck, so both paths have to be absolute first.
+ORIG=$(cd "$(dirname "$ORIG")" && pwd)/$(basename "$ORIG")
+NEW=$(cd "$(dirname "$NEW")" && pwd)/$(basename "$NEW")
+
 cd "$HERE/fieldcheck"
 dotnet run -- "$ORIG" "$NEW"

@@ -19,8 +19,8 @@
 ## 目录
 
 ```
-play-preferences.patch                    完整补丁（基于 upstream/main @ e8fc18a = 1.0-349）
-play-preferences-upstream-e8fc18a.patch   上一版存档
+play-preferences.patch                    完整补丁（基于 upstream/main @ 69bb7a7，兼容 1.0-349 全版本）
+play-preferences-upstream-e8fc18a.patch   上一版存档（基线 e8fc18a）
 README.md                                 本文
 tools/build-runtime-dll.sh                用 app 自带程序集编译 OurTaiko.Runtime.dll
 tools/save-original.sh                    保存未打补丁的原版 DLL（升级 app 后先跑）
@@ -57,7 +57,7 @@ tools/save-original.sh
 # 2) 把补丁重放到新的上游代码（有冲突会列出来）
 tools/update-source.sh upstream/main "/Users/vincent/Documents/开发/OurTaikoPlay"
 #    在 ../OurTaikoPlay 里解冲突 → 重新生成 play-preferences.patch：
-#    cd ../OurTaikoPlay && git add -A && git diff --cached HEAD > ../OurTaikoPlay-patch/play-preferences.patch
+#    cd ../OurTaikoPlay && git diff main > ../OurTaikoPlay-patch/play-preferences.patch
 
 # 3) 用新装 app 自带的程序集重新编译
 tools/build-runtime-dll.sh "/Users/vincent/Documents/开发/OurTaikoPlay" /Applications/OurTaikoPlay.app

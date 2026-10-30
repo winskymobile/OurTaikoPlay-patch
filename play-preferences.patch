@@ -1815,7 +1815,7 @@ index 30e3190..c8b49c5 100644
                  Assert.That(song.ReadDisplayInfo().Subtitle, Is.EqualTo("Base subtitle"), "Missing translations use the original, not Japanese.");
                  Assert.That(song.ReadInfo().Title, Is.EqualTo("Base"));
 diff --git a/README.en.md b/README.en.md
-index 3c634a4..3ffce05 100644
+index 662499c..62dc4ae 100644
 --- a/README.en.md
 +++ b/README.en.md
 @@ -69,7 +69,7 @@ Songs (`Songs/`), settings, scores, and caches share one data folder:
@@ -1837,7 +1837,7 @@ index 3c634a4..3ffce05 100644
  ## Build
  
 diff --git a/README.ja.md b/README.ja.md
-index 6295784..1759561 100644
+index 28b523a..ef4ffda 100644
 --- a/README.ja.md
 +++ b/README.ja.md
 @@ -69,7 +69,7 @@ git submodule update --init --recursive
@@ -1859,7 +1859,7 @@ index 6295784..1759561 100644
  ## ビルド
  
 diff --git a/README.md b/README.md
-index 538a253..0b48dc2 100644
+index 57cef40..7319234 100644
 --- a/README.md
 +++ b/README.md
 @@ -75,7 +75,7 @@ Entry 的「ゲーム設定」可进入系统设置。

@@ -12,6 +12,8 @@
 | --- | --- |
 | macOS 数据目录 | 正式版数据从 `.app` 内迁到 `~/Library/Application Support/OurTaiko/OurTaikoPlay/`；首次启动复制 `Songs`、`cache`、`settings.json`、`options.json`、`player.json`、`servers.json`、`scores.sqlite3`，旧文件保留不删 |
 | 界面语言 | 设置菜单（英 / 日 / 简 / 繁 / 韩）与游戏内文字（日 / 简 / 繁，英韩回落日文）；设置页标题、入口看板、声音页、账号页、按键项、提示与状态行全部走译文表 |
+| 简繁字体 | 简体、繁体界面引用游戏自身的 `FOT-OedKtr Std E`（`大江户勘亭流.otf`）；字体在构建时嵌入 `OurTaiko.Runtime.dll`，运行时释放到缓存并生成 TMP 动态字体。文字沿用原材质的描边（`Nijiiro UI SDF Outline`），字体与材质成对替换/还原 |
+| 结算页面 | 难度页签、判定标签、成绩 / 通关、曲目序号等日文切图与文本按简繁重绘；简繁结算贴图同样嵌入 DLL |
 | 飞出音符绘制 | 显示设置新增「飞出音符」（图片 / 精灵）与「飞出数量」（高 / 中 / 低） |
 
 保留上游的背景影片设置（背景影片、影片时轨道不透明度），显示页共 6 项。
@@ -19,10 +21,13 @@
 ## 目录
 
 ```
-play-preferences.patch                    完整补丁（基于 upstream/main @ 69bb7a7，兼容 1.0-349 全版本）
+play-preferences.patch                    完整补丁（基于 upstream/main @ 69bb7a7，兼容 1.0-349 / 1.0-350）
+FOT-OedKtrStdE.otf                        简繁界面与结算切图字体（大江户勘亭流，补了 6 个繁体 cmap 别名；构建时嵌入 DLL）
 play-preferences-upstream-e8fc18a.patch   上一版存档（基线 e8fc18a）
 README.md                                 本文
-tools/build-runtime-dll.sh                用 app 自带程序集编译 OurTaiko.Runtime.dll
+tools/build-runtime-dll.sh                用 app 自带程序集编译 OurTaiko.Runtime.dll（嵌入字体与简繁结算贴图）
+tools/make-result-art.py                  用 FOT-OedKtrStdE.otf 生成简繁结算页面贴图
+tools/make-font.py                        从大江户勘亭流.otf 重新生成 FOT-OedKtrStdE.otf（需要 fontTools）
 tools/save-original.sh                    保存未打补丁的原版 DLL（升级 app 后先跑）
 tools/install.sh                          关掉游戏、校验布局、备份、安装、合并 settings.json
 tools/restore.sh                          还原为未打补丁的 DLL

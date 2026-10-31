@@ -31,7 +31,7 @@ for key, columns in table.items():
 used = set()
 for path in glob.glob(os.path.join(src, "Assets/OurTaiko/Runtime/**/*.cs"), recursive=True):
     body = open(path, encoding="utf-8").read()
-    for call in ("Settings", "SettingsFormat", "InGame"):
+    for call in ("Settings", "SettingsFormat", "InGame", "InGameFormat"):
         for key in re.findall(rf'{call}\("((?:[^"\\]|\\.)*)"', body):
             used.add(key)
 

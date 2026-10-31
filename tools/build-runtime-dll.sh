@@ -32,9 +32,32 @@ RSP="$OUT/runtime.rsp"
   find "$SRC/Assets/OurTaiko/Runtime" -name '*.cs' | sort
 } > "$RSP"
 
+# The result board paints its difficulty tabs and judge labels into sprites that the runtime
+# swaps for Simplified/Traditional copies in FOT-OedKtr Std E. Simplified and Traditional text
+# also use that font, so both the art and the font are embedded in the DLL.
+ART="$OUT/art"
+"$HERE/make-result-art.py" "$SRC" "$ART" >/dev/null
+FONT="$HERE/../FOT-OedKtrStdE.otf"
+[ -f "$FONT" ] || { echo "FOT-OedKtrStdE.otf is required; put it next to tools/" >&2; exit 1; }
+RESOURCES=(
+  "-resource:$ART/difficulty.zh.png,OurTaiko.Art.difficulty.zh.png"
+  "-resource:$ART/difficulty.zh_tw.png,OurTaiko.Art.difficulty.zh_tw.png"
+  "-resource:$ART/judge.zh.png,OurTaiko.Art.judge.zh.png"
+  "-resource:$ART/judge.zh_tw.png,OurTaiko.Art.judge.zh_tw.png"
+  "-resource:$ART/score.zh.png,OurTaiko.Art.score.zh.png"
+  "-resource:$ART/score.zh_tw.png,OurTaiko.Art.score.zh_tw.png"
+  "-resource:$ART/clear.zh.png,OurTaiko.Art.clear.zh.png"
+  "-resource:$ART/clear.zh_tw.png,OurTaiko.Art.clear.zh_tw.png"
+  "-resource:$ART/clear_dark.zh.png,OurTaiko.Art.clear_dark.zh.png"
+  "-resource:$ART/clear_dark.zh_tw.png,OurTaiko.Art.clear_dark.zh_tw.png"
+  "-resource:$FONT,OurTaiko.Art.OedKtrStdE.otf"
+)
+echo "font   $FONT"
+
 dotnet "$CSC" -nologo -target:library -langversion:9 -nostdlib -optimize+ -debug- \
   -define:UNITY_2023_3_OR_NEWER -define:UNITY_6000_0_OR_NEWER \
   -define:UNITY_STANDALONE -define:UNITY_STANDALONE_OSX -define:ENABLE_MONO \
+  "${RESOURCES[@]}" \
   -out:"$OUT/OurTaiko.Runtime.dll" "@$RSP" 2>&1 | grep -v 'warning CS' || true
 
 [ -f "$OUT/OurTaiko.Runtime.dll" ] || { echo "build failed" >&2; exit 1; }

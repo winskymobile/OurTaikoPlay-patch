@@ -5,3 +5,6 @@ tools/fieldcheck/obj/
 backup/*.dll
 backup/app-support/
 backup/app-bundle-settings.json
+__pycache__/
+backup/fonts/
+FOT-大江戸勘亭流 Std E.otf

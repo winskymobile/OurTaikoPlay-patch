@@ -225,6 +225,188 @@ index 165675d..8bcf0ae 100644
  
          // Applies these settings to the running player; render every frame (no frame skipping).
          public void Apply()
+diff --git a/Assets/OurTaiko/Runtime/Core/InGameFont.cs b/Assets/OurTaiko/Runtime/Core/InGameFont.cs
+new file mode 100644
+index 0000000..907322e
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/InGameFont.cs
+@@ -0,0 +1,159 @@
++using System.Collections.Generic;
++using System.IO;
++using TMPro;
++using UnityEngine;
++using UnityEngine.TextCore.LowLevel;
++
++namespace OurTaiko
++{
++    // Simplified and Traditional Chinese use the same lettering as the Japanese UI:
++    // FOT-OedKtr Std E (Assets/OurTaiko/Art/大江户勘亭流.otf), embedded by the patch build.
++    // A font asset carries one material, so swapping only TMP's font drops the outline the game
++    // paints through "Nijiiro UI SDF Outline". Every text therefore keeps its original material
++    // style: the style is cloned once against the new atlas, and the font and material are
++    // restored together when the language leaves Simplified/Traditional.
++    sealed class InGameFont : MonoBehaviour
++    {
++        const string ResourceName = "OurTaiko.Art.OedKtrStdE.otf";
++        const string CacheFile = "OedKtrStdE.otf";
++        static InGameFont driver;
++        static TMP_FontAsset asset;
++        static bool failed;
++        static string language;
++        static readonly Dictionary<TMP_Text, TMP_FontAsset> Originals = new Dictionary<TMP_Text, TMP_FontAsset>();
++        static readonly Dictionary<Material, Material> Clones = new Dictionary<Material, Material>();
++        static readonly Dictionary<Material, Material> Sources = new Dictionary<Material, Material>();
++        float nextScan;
++
++        public static TMP_FontAsset Asset => asset;
++
++        // Called from ApplyInGame and from the screens that build text every frame.
++        public static void Use(TMP_Text text)
++        {
++            if (text == null) return;
++            string current = UiText.InGameLanguage(UiText.Language);
++            if (current != "zh" && current != "zh_tw") { Restore(text); return; }
++            var wanted = Load();
++            if (wanted == null) { Restore(text); return; }
++            Swap(text, wanted);
++        }
++
++        public static void Use(Transform root)
++        {
++            if (root == null) return;
++            foreach (var text in root.GetComponentsInChildren<TMP_Text>(true)) Use(text);
++        }
++
++        public static void EnsureDriver()
++        {
++            if (driver != null) return;
++            var go = new GameObject("InGameFont");
++            driver = go.AddComponent<InGameFont>();
++            DontDestroyOnLoad(go);
++        }
++
++        // Text built after a screen's first paint (pooled cards, search rows) picks the font up here.
++        void Update()
++        {
++            if (Time.unscaledTime < nextScan) return;
++            nextScan = Time.unscaledTime + 0.5f;
++            string current = UiText.InGameLanguage(UiText.Language);
++            if (current != "zh" && current != "zh_tw")
++            {
++                if (language != current) { language = current; RestoreAll(); }
++                return;
++            }
++            language = current;
++            var wanted = Load();
++            if (wanted == null) return;
++            foreach (var canvas in Object.FindObjectsOfType<Canvas>())
++                foreach (var text in canvas.GetComponentsInChildren<TMP_Text>(true)) Swap(text, wanted);
++        }
++
++        static void Swap(TMP_Text text, TMP_FontAsset font)
++        {
++            if (text == null) return;
++            if (!Originals.ContainsKey(text)) Originals[text] = text.font;
++            var material = Map(text.fontSharedMaterial, font);
++            if (text.font != font) text.font = font;
++            if (text.fontSharedMaterial != material) text.fontSharedMaterial = material;
++        }
++
++        static void Restore(TMP_Text text)
++        {
++            if (text == null) return;
++            if (text.fontSharedMaterial != null && Sources.TryGetValue(text.fontSharedMaterial, out var source))
++                text.fontSharedMaterial = source;
++            if (Originals.TryGetValue(text, out var font) && text.font != font) text.font = font;
++        }
++
++        static void RestoreAll()
++        {
++            foreach (var canvas in Object.FindObjectsOfType<Canvas>())
++                foreach (var text in canvas.GetComponentsInChildren<TMP_Text>(true)) Restore(text);
++            Originals.Clear();
++        }
++
++        // One clone per distinct shared material (plain text, outlined text, title plates, …).
++        // The clone keeps that material's outline, face dilation and colours; only the atlas and
++        // its sampling parameters move to the new font asset. Screens that restyle a text after
++        // it was swapped (fresh material) are cloned from that material instead of a stale one.
++        static Material Map(Material current, TMP_FontAsset font)
++        {
++            if (current == null) return font.material;
++            var original = Sources.TryGetValue(current, out var source) ? source : current;
++            if (Clones.TryGetValue(original, out var mapped)) return mapped;
++            mapped = new Material(original)
++            {
++                name = original.name + " (OedKtr)",
++                shaderKeywords = original.shaderKeywords
++            };
++            mapped.SetTexture(ShaderUtilities.ID_MainTex, font.atlasTexture);
++            mapped.SetFloat(ShaderUtilities.ID_TextureWidth, font.atlasWidth);
++            mapped.SetFloat(ShaderUtilities.ID_TextureHeight, font.atlasHeight);
++            mapped.SetFloat(ShaderUtilities.ID_GradientScale, font.atlasPadding + 1);
++            Clones[original] = mapped;
++            Sources[mapped] = original;
++            return mapped;
++        }
++
++        static TMP_FontAsset Load()
++        {
++            if (asset != null || failed) return asset;
++            try
++            {
++                string path = Extract();
++                if (path == null) { failed = true; return null; }
++                // 64 pt and 32 px padding are Nijiiro UI SDF's own settings, so the outline keeps
++                // exactly its width. One 6144 atlas holds the whole translation table plus room
++                // for song titles that are added while browsing.
++                asset = TMP_FontAsset.CreateFontAsset(path, 0, 64, 32, GlyphRenderMode.SDFAA, 6144, 6144);
++                if (asset == null) { failed = true; return null; }
++                asset.atlasPopulationMode = AtlasPopulationMode.Dynamic;
++                asset.isMultiAtlasTexturesEnabled = true;
++                if (!asset.TryAddCharacters(UiText.InGameCharacters(), out string missing, false))
++                    Debug.LogWarning("in-game font is missing: " + missing);
++                return asset;
++            }
++            catch (System.Exception error)
++            {
++                Debug.LogWarning("in-game font unavailable: " + error.Message);
++                failed = true;
++                return null;
++            }
++        }
++
++        static string Extract()
++        {
++            string dir = Path.Combine(Application.persistentDataPath, "cache");
++            string path = Path.Combine(dir, CacheFile);
++            Directory.CreateDirectory(dir);
++            using var stream = typeof(InGameFont).Assembly.GetManifestResourceStream(ResourceName);
++            if (stream == null) return null;
++            if (File.Exists(path) && new FileInfo(path).Length == stream.Length) return path;
++            using var target = File.Create(path);
++            stream.CopyTo(target);
++            return path;
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Core/InGameFont.cs.meta b/Assets/OurTaiko/Runtime/Core/InGameFont.cs.meta
+new file mode 100644
+index 0000000..921a46c
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/InGameFont.cs.meta
+@@ -0,0 +1,11 @@
++fileFormatVersion: 2
++guid: 8e1c3d5a7b2f4c9d8a6e0b1f2c3d4e5f
++MonoImporter:
++  externalObjects: {}
++  serializedVersion: 2
++  defaultReferences: []
++  executionOrder: 0
++  icon: {instanceID: 0}
++  userData: 
++  assetBundleName: 
++  assetBundleVariant: 
 diff --git a/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs
 new file mode 100644
 index 0000000..09b54d9
@@ -348,11 +530,13 @@ index 9e15963..d85bed7 100644
              new SettingType("OurTaiko Accounts", AccountItems(0).Concat(AccountItems(1)).Concat(new[]
 diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
 new file mode 100644
-index 0000000..c585b54
+index 0000000..312ab6c
 --- /dev/null
 +++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
-@@ -0,0 +1,346 @@
+@@ -0,0 +1,545 @@
 +using System.Collections.Generic;
++using TMPro;
++using UnityEngine;
 +
 +namespace OurTaiko
 +{
@@ -656,12 +840,186 @@ index 0000000..c585b54
 +            ["Automatic"] = Row("自動", "自动", "自動", "자동"),
 +            ["Enter: save / Esc or tap outside: cancel"] =
 +                Row("Enter：保存 / Esc または外をタップ：キャンセル", "回车：保存 / Esc 或点外部：取消", "Enter：儲存 / Esc 或點外部：取消", "Enter: 저장 / Esc 또는 바깥 탭: 취소"),
++            ["すきな曲や、むずかしさを"] = Row("すきな曲や、むずかしさを", "选择喜欢的歌曲和难度，", "選擇喜歡的歌曲和難度，", "すきな曲や、むずかしさを"),
++            ["えらんであそべるよ！"] = Row("えらんであそべるよ！", "自由游玩吧！", "自由遊玩吧！", "えらんであそべるよ！"),
++            ["３曲連続して演奏しながら、"] = Row("３曲連続して演奏しながら、", "连续演奏三首歌曲，", "連續演奏三首歌曲，", "３曲連続して演奏しながら、"),
++            ["お題の合格を目指そう！"] = Row("お題の合格を目指そう！", "以通过课题为目标吧！", "以通過課題為目標吧！", "お題の合格を目指そう！"),
++            ["合格すると腕前が認定されるよ！"] = Row("合格すると腕前が認定されるよ！", "通过后实力会得到认定！", "通過後實力會得到認定！", "合格すると腕前が認定されるよ！"),
++            ["小節とスピードをえらんで"] = Row("小節とスピードをえらんで", "选择小节和速度，", "選擇小節和速度，", "小節とスピードをえらんで"),
++            ["くりかえし練習できるよ！"] = Row("くりかえし練習できるよ！", "可以反复练习！", "可以反覆練習！", "くりかえし練習できるよ！"),
++            ["ゲームのせっていを"] = Row("ゲームのせっていを", "游戏设置可以", "遊戲設定可以", "ゲームのせっていを"),
++            ["かえられるよ！"] = Row("かえられるよ！", "在这里更改！", "在這裡變更！", "かえられるよ！"),
++            ["１人プレイ"] = Row("１人プレイ", "单人游玩", "單人遊玩", "１人プレイ"),
++            ["２人プレイ"] = Row("２人プレイ", "双人游玩", "雙人遊玩", "２人プレイ"),
++            ["2人プレイ"] = Row("2人プレイ", "双人游玩", "雙人遊玩", "2人プレイ"),
++            ["太鼓をたたいてスタート！"] = Row("太鼓をたたいてスタート！", "敲击太鼓开始！", "敲擊太鼓開始！", "太鼓をたたいてスタート！"),
++            ["太鼓をたたいてスタート!"] = Row("太鼓をたたいてスタート!", "敲击太鼓开始！", "敲擊太鼓開始！", "太鼓をたたいてスタート!"),
++            ["フリープレイ"] = Row("フリープレイ", "自由游玩", "自由遊玩", "フリープレイ"),
++            ["Presented by"] = Row("Presented by", "Presented by", "Presented by", "Presented by"),
++            ["Space / Tap: Skip"] = Row("Space / タップ：スキップ", "Space / 点击：跳过", "Space / 點擊：跳過", "Space / タップ：スキップ"),
++            ["Cancelling…"] = Row("キャンセル中…", "正在取消…", "正在取消…", "キャンセル中…"),
++            ["Checking {0}'s OurTaiko account…"] = Row("OurTaiko アカウント（{0}）を確認中…", "正在检查 {0} 的 OurTaiko 账号…", "正在檢查 {0} 的 OurTaiko 帳號…", "OurTaiko アカウント（{0}）を確認中…"),
++            ["Signing {0} in to {1}…"] = Row("{0} を {1} にサインイン中…", "正在登录 {1}（{0}）…", "正在登入 {1}（{0}）…", "{0} を {1} にサインイン中…"),
++            ["Loading song list ({0} / {1}): {2}…"] = Row("曲リストを読み込み中（{0} / {1}）：{2}…", "正在加载曲目列表（{0} / {1}）：{2}…", "正在載入曲目列表（{0} / {1}）：{2}…", "曲リストを読み込み中（{0} / {1}）：{2}…"),
++            ["{0}'s OurTaiko sign-in has expired. Sign in again in the game settings."] = Row("{0} の OurTaiko サインインが切れました。ゲーム設定で再度サインインしてください。", "{0} 的 OurTaiko 登录已失效。请在游戏设置中重新登录。", "{0} 的 OurTaiko 登入已失效。請在遊戲設定中重新登入。", "{0} の OurTaiko サインインが切れました。ゲーム設定で再度サインインしてください。"),
++            ["自己ベスト"] = Row("自己ベスト", "个人最佳", "個人最佳", "自己ベスト"),
++            ["Search"] = Row("検索", "搜索", "搜尋", "検索"),
++            ["Back"] = Row("もどる", "返回", "返回", "もどる"),
++            ["Song search"] = Row("曲をさがす", "歌曲搜索", "歌曲搜尋", "曲をさがす"),
++            [" Title / Subtitle / Maker"] = Row(" 曲名 / サブタイトル / 譜面作者", " 曲名 / 副标题 / 谱师", " 曲名 / 副標題 / 譜師", " 曲名 / サブタイトル / 譜面作者"),
++            ["かんたん"] = Row("かんたん", "简单", "簡單", "かんたん"),
++            ["ふつう"] = Row("ふつう", "普通", "普通", "ふつう"),
++            ["むずかしい"] = Row("むずかしい", "困难", "困難", "むずかしい"),
++            ["おに"] = Row("おに", "魔王", "魔王", "おに"),
++            ["おに(裏)"] = Row("おに(裏)", "魔王（里）", "魔王（裏）", "おに(裏)"),
++            ["Easy"] = Row("かんたん", "简单", "簡單", "かんたん"),
++            ["Normal"] = Row("ふつう", "普通", "普通", "ふつう"),
++            ["Hard"] = Row("むずかしい", "困难", "困難", "むずかしい"),
++            ["Oni"] = Row("おに", "魔王", "魔王", "おに"),
++            ["Ura"] = Row("おに(裏)", "魔王（里）", "魔王（裏）", "おに(裏)"),
++            ["良"] = Row("良", "良", "良", "良"),
++            ["可"] = Row("可", "可", "可", "可"),
++            ["不可"] = Row("不可", "不可", "不可", "不可"),
++            ["連打数"] = Row("連打数", "连打数", "連打數", "連打数"),
++            ["最大コンボ数"] = Row("最大コンボ数", "最大连击数", "最大連擊數", "最大コンボ数"),
++            ["もどる"] = Row("もどる", "返回", "返回", "もどる"),
++            ["ローカル"] = Row("ローカル", "本地", "本地", "ローカル"),
++            ["外伝"] = Row("外伝", "外传", "外傳", "外伝"),
++            ["演奏オプション"] = Row("演奏オプション", "演奏选项", "演奏選項", "演奏オプション"),
++            ["オート"] = Row("オート", "自动", "自動", "オート"),
++            ["演奏スキップ"] = Row("演奏スキップ", "跳过演奏", "跳過演奏", "演奏スキップ"),
++            ["音色"] = Row("音色", "音色", "音色", "音色"),
++            ["ランダム"] = Row("ランダム", "随机", "隨機", "ランダム"),
++            ["ドロン"] = Row("ドロン", "咚隆", "咚隆", "ドロン"),
++            ["あべこべ"] = Row("あべこべ", "反转", "反轉", "あべこべ"),
++            ["はやさ"] = Row("はやさ", "速度", "速度", "はやさ"),
++            ["しない"] = Row("しない", "关闭", "關閉", "しない"),
++            ["する"] = Row("する", "开启", "開啟", "する"),
++            ["きまぐれ"] = Row("きまぐれ", "随性", "隨性", "きまぐれ"),
++            ["でたらめ"] = Row("でたらめ", "完全随机", "完全隨機", "でたらめ"),
++            ["無音"] = Row("無音", "静音", "靜音", "無音"),
++            ["太鼓"] = Row("太鼓", "太鼓", "太鼓", "太鼓"),
++            ["ログイン"] = Row("ログイン", "登录", "登入", "ログイン"),
++            ["ゲスト"] = Row("ゲスト", "访客", "訪客", "ゲスト"),
++            ["スキップ"] = Row("スキップ", "跳过", "跳過", "スキップ"),
++            ["ユーザー名"] = Row("ユーザー名", "用户名", "使用者名稱", "ユーザー名"),
++            ["パスワード"] = Row("パスワード", "密码", "密碼", "パスワード"),
++            ["ログインすると過去のスコアを確認できます。練習のスコアは保存しません。"] = Row("ログインすると過去のスコアを確認できます。練習のスコアは保存しません。", "登录后可查看过去的成绩。练习成绩不会保存。", "登入後可查看過去的成績。練習成績不會儲存。", "ログインすると過去のスコアを確認できます。練習のスコアは保存しません。"),
++            ["ログインするとスコアがサーバーに保存されます。ゲストはスコアを保存しません。"] = Row("ログインするとスコアがサーバーに保存されます。ゲストはスコアを保存しません。", "登录后成绩会保存到服务器。访客不会保存成绩。", "登入後成績會儲存到伺服器。訪客不會儲存成績。", "ログインするとスコアがサーバーに保存されます。ゲストはスコアを保存しません。"),
++            ["曲リストを読み込み中… {0} / {1}"] = Row("曲リストを読み込み中… {0} / {1}", "正在加载曲目列表… {0} / {1}", "正在載入曲目列表… {0} / {1}", "曲リストを読み込み中… {0} / {1}"),
++            ["ユーザー名とパスワードを入力してください。"] = Row("ユーザー名とパスワードを入力してください。", "请输入用户名和密码。", "請輸入使用者名稱和密碼。", "ユーザー名とパスワードを入力してください。"),
++            ["サーバーに接続中…"] = Row("サーバーに接続中…", "正在连接服务器…", "正在連線伺服器…", "サーバーに接続中…"),
++            ["ログイン中…"] = Row("ログイン中…", "正在登录…", "正在登入…", "ログイン中…"),
++            ["{0}として接続しました（{1} 曲）"] = Row("{0}として接続しました（{1} 曲）", "已以 {0} 连接（{1} 首）", "已以 {0} 連線（{1} 首）", "{0}として接続しました（{1} 曲）"),
++            ["キャンセルしました。"] = Row("キャンセルしました。", "已取消。", "已取消。", "キャンセルしました。"),
++            ["ユーザー名またはパスワードが正しくありません。"] = Row("ユーザー名またはパスワードが正しくありません。", "用户名或密码不正确。", "使用者名稱或密碼不正確。", "ユーザー名またはパスワードが正しくありません。"),
++            ["ログインの試行回数が多すぎます。しばらくしてから再試行してください。"] = Row("ログインの試行回数が多すぎます。しばらくしてから再試行してください。", "登录尝试次数过多。请稍后再试。", "登入嘗試次數過多。請稍後再試。", "ログインの試行回数が多すぎます。しばらくしてから再試行してください。"),
++            ["接続できませんでした："] = Row("接続できませんでした：", "连接失败：", "連線失敗：", "接続できませんでした："),
++            ["音源を読み込み中…"] = Row("音源を読み込み中…", "正在加载音源…", "正在載入音源…", "音源を読み込み中…"),
++            ["サーバーを確認中…"] = Row("サーバーを確認中…", "正在检查服务器…", "正在檢查伺服器…", "サーバーを確認中…"),
++            ["譜面を準備中…"] = Row("譜面を準備中…", "正在准备谱面…", "正在準備譜面…", "譜面を準備中…"),
++            ["譜面"] = Row("譜面", "谱面", "譜面", "譜面"),
++            ["音源"] = Row("音源", "音源", "音源", "音源"),
++            ["映像"] = Row("映像", "影片", "影片", "映像"),
++            ["待機中"] = Row("待機中", "等待中", "等待中", "待機中"),
++            ["確認中"] = Row("確認中", "检查中", "檢查中", "確認中"),
++            ["キャッシュ済み"] = Row("キャッシュ済み", "已缓存", "已快取", "キャッシュ済み"),
++            ["完了"] = Row("完了", "完成", "完成", "完了"),
++            ["DOWNLOAD_FAILED"] = Row("ダウンロードに失敗しました", "下载失败", "下載失敗", "ダウンロードに失敗しました"),
++            ["AUDIO_LOAD_FAILED"] = Row("音源を読み込めませんでした", "音源无法加载", "音源無法載入", "音源を読み込めませんでした"),
++            ["AUDIO_DECODE_FAILED"] = Row("音源をデコードできませんでした", "音源无法解码", "音源無法解碼", "音源をデコードできませんでした"),
++            ["CHART_LOAD_FAILED"] = Row("譜面を読み込めませんでした", "谱面无法加载", "譜面無法載入", "譜面を読み込めませんでした"),
++            ["次数"] = Row("次数", "次数", "次數", "次数"),
++            ["平均偏差"] = Row("平均偏差", "平均偏差", "平均偏差", "平均偏差"),
++            ["标准差"] = Row("标准差", "标准差", "標準差", "标准差"),
++            ["平均绝对偏差"] = Row("平均绝对偏差", "平均绝对偏差", "平均絕對偏差", "平均绝对偏差"),
++            ["早 ← 偏差 ms → 晚    每格 5 ms"] = Row("早 ← ずれ ms → 遅    1目盛 5 ms", "早 ← 偏差 ms → 晚    每格 5 ms", "早 ← 偏差 ms → 晚    每格 5 ms", "早 ← ずれ ms → 遅    1目盛 5 ms"),
++            ["调整 A（音频偏移）"] = Row("調整 A（音声オフセット）", "调整 A（音频偏移）", "調整 A（音訊偏移）", "調整 A（音声オフセット）"),
++            ["调整 B（判定偏移）"] = Row("調整 B（判定オフセット）", "调整 B（判定偏移）", "調整 B（判定偏移）", "調整 B（判定オフセット）"),
++            ["底色：<color=#9A7700>良</color> / <color=#B45329>可</color>"] = Row("下地：<color=#9A7700>良</color> / <color=#B45329>可</color>", "底色：<color=#9A7700>良</color> / <color=#B45329>可</color>", "底色：<color=#9A7700>良</color> / <color=#B45329>可</color>", "下地：<color=#9A7700>良</color> / <color=#B45329>可</color>"),
++            ["曲目"] = Row("曲目", "曲目", "曲目", "曲目"),
++            ["スコア"] = Row("スコア", "分数", "分數", "스코어"),
++            ["クリア"] = Row("クリア", "通关", "通關", "클리어"),
++            ["{0}曲目"] = Row("{0}曲目", "第{0}首", "第{0}首", "{0}曲目"),
++            ["ベストスコア更新！"] = Row("ベストスコア更新！", "最佳成绩更新！", "最佳成績更新！", "ベストスコア更新！"),
++            ["もう少し\nがんばるドン!"] = Row("もう少し\nがんばるドン!", "再努力一点\n咚！", "再努力一點\n咚！", "もう少し\nがんばるドン!"),
++            ["おしかったドン"] = Row("おしかったドン", "好可惜咚", "好可惜咚", "おしかったドン"),
++            ["ノリノリだドン"] = Row("ノリノリだドン", "节奏超棒咚", "節奏超棒咚", "ノリノリだドン"),
++            ["よくできたドン！"] = Row("よくできたドン！", "做得很好咚！", "做得很好咚！", "よくできたドン！"),
++            ["魂ゲージ"] = Row("魂ゲージ", "魂槽", "魂槽", "魂ゲージ"),
++            ["今回の挑戦は記録されません"] = Row("今回の挑戦は記録されません", "本次挑战不会被记录", "本次挑戰不會被記錄", "今回の挑戦は記録されません"),
++            ["段位がありません\n曲フォルダの Dan/ に .otdan.json を置いてください"] =
++                Row("段位がありません\n曲フォルダの Dan/ に .otdan.json を置いてください",
++                    "没有段位\n请在曲目文件夹的 Dan/ 中放置 .otdan.json",
++                    "沒有段位\n請在曲目資料夾的 Dan/ 中放置 .otdan.json",
++                    "段位がありません\n曲フォルダの Dan/ に .otdan.json を置いてください"),
++            ["段位コードを入力"] = Row("段位コードを入力", "输入段位代码", "輸入段位代碼", "段位コードを入力"),
++            ["段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力"] = Row("段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力", "输入段位代码，可以挑战列表中没有的段位。\n按咚输入代码", "輸入段位代碼，可以挑戰列表中沒有的段位。\n按咚輸入代碼", "段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力"),
++            ["英数字 6 文字のコードを入力してください"] = Row("英数字 6 文字のコードを入力してください", "请输入 6 位字母数字代码", "請輸入 6 位字母數字代碼", "英数字 6 文字のコードを入力してください"),
++            ["サーバーに接続していません"] = Row("サーバーに接続していません", "未连接服务器", "未連線伺服器", "サーバーに接続していません"),
++            ["検索中…"] = Row("検索中…", "搜索中…", "搜尋中…", "検索中…"),
++            ["コード {0} の段位はありません"] = Row("コード {0} の段位はありません", "代码 {0} 的段位不存在", "代碼 {0} 的段位不存在", "コード {0} の段位はありません"),
++            ["取得できませんでした: {0}"] = Row("取得できませんでした: {0}", "获取失败：{0}", "取得失敗：{0}", "取得できませんでした: {0}"),
++            ["？？？"] = Row("？？？", "？？？", "？？？", "？？？"),
++            ["Enter で決定　Esc で戻る"] = Row("Enter で決定　Esc で戻る", "Enter 确认　Esc 返回", "Enter 確認　Esc 返回", "Enter で決定　Esc で戻る"),
++            [" の段位コードを入力"] = Row(" の段位コードを入力", " 的段位代码", " 的段位代碼", " の段位コードを入力"),
++            ["未満"] = Row("未満", "未满", "未滿", "未満"),
++            ["以上"] = Row("以上", "以上", "以上", "以上"),
++            ["BACK"] = Row("もどる", "返回", "返回", "もどる"),
++            ["RESTART"] = Row("リスタート", "重新开始", "重新開始", "リスタート"),
++            ["FINISHED"] = Row("演奏終了", "演奏结束", "演奏結束", "演奏終了"),
++            ["初級"] = Row("初級", "初级", "初級", "初級"),
++            ["十級"] = Row("十級", "十级", "十級", "十級"),
++            ["九級"] = Row("九級", "九级", "九級", "九級"),
++            ["八級"] = Row("八級", "八级", "八級", "八級"),
++            ["七級"] = Row("七級", "七级", "七級", "七級"),
++            ["六級"] = Row("六級", "六级", "六級", "六級"),
++            ["五級"] = Row("五級", "五级", "五級", "五級"),
++            ["四級"] = Row("四級", "四级", "四級", "四級"),
++            ["三級"] = Row("三級", "三级", "三級", "三級"),
++            ["二級"] = Row("二級", "二级", "二級", "二級"),
++            ["一級"] = Row("一級", "一级", "一級", "一級"),
++            ["初段"] = Row("初段", "初段", "初段", "初段"),
++            ["二段"] = Row("二段", "二段", "二段", "二段"),
++            ["三段"] = Row("三段", "三段", "三段", "三段"),
++            ["四段"] = Row("四段", "四段", "四段", "四段"),
++            ["五段"] = Row("五段", "五段", "五段", "五段"),
++            ["六段"] = Row("六段", "六段", "六段", "六段"),
++            ["七段"] = Row("七段", "七段", "七段", "七段"),
++            ["八段"] = Row("八段", "八段", "八段", "八段"),
++            ["九段"] = Row("九段", "九段", "九段", "九段"),
++            ["十段"] = Row("十段", "十段", "十段", "十段"),
++            ["玄人"] = Row("玄人", "玄人", "玄人", "玄人"),
++            ["名人"] = Row("名人", "名人", "名人", "名人"),
++            ["超人"] = Row("超人", "超人", "超人", "超人"),
++            ["達人"] = Row("達人", "达人", "達人", "達人"),
++            ["赤合格"] = Row("赤合格", "红合格", "紅合格", "赤合格"),
++            ["赤合格・フルコンボ"] = Row("赤合格・フルコンボ", "红合格・全连", "紅合格・全連", "赤合格・フルコンボ"),
++            ["赤合格・全良"] = Row("赤合格・全良", "红合格・全良", "紅合格・全良", "赤合格・全良"),
++            ["金合格"] = Row("金合格", "金合格", "金合格", "金合格"),
++            ["金合格・フルコンボ"] = Row("金合格・フルコンボ", "金合格・全连", "金合格・全連", "金合格・フルコンボ"),
++            ["金合格・全良"] = Row("金合格・全良", "金合格・全良", "金合格・全良", "金合格・全良"),
++            ["不合格"] = Row("不合格", "不合格", "不合格", "不合格"),
++            ["决定"] = Row("決定", "确认", "確認", "決定"),
 +        };
 +
 +        static string[] Row(string ja, string zh, string zhTw, string ko) => new[] { ja, zh, zhTw, ko };
 +
 +        public static string InGameLanguage(string language) =>
 +            language == "ja" || language == "zh" || language == "zh_tw" ? language : "ja";
++
++        // Every character the in-game table can show in Simplified or Traditional Chinese, so the
++        // patched font asset can bake them up front instead of growing its atlas during play.
++        public static string InGameCharacters()
++        {
++            var seen = new HashSet<char>();
++            foreach (var row in Table.Values)
++                foreach (char c in row[1] + row[2]) seen.Add(c);
++            foreach (char c in "0123456789★☆（）()・：:！!？?…—-/ ") seen.Add(c);
++            var chars = new char[seen.Count];
++            seen.CopyTo(chars);
++            return new string(chars);
++        }
 +
 +        public static string Settings(string source) => Settings(source, CurrentLanguage());
 +
@@ -682,6 +1040,29 @@ index 0000000..c585b54
 +            string shown = InGameLanguage(language);
 +            if (shown == "ja") return Find(source, "ja") ?? source;
 +            return Find(source, shown) ?? Find(source, "ja") ?? source;
++        }
++
++        // In-game text with placeholders, e.g. "コード {0} の段位はありません".
++        public static string InGameFormat(string source, params object[] args) =>
++            string.Format(InGame(source), args);
++
++        // Translates a screen's saved text once it has been bound: only exact table matches change,
++        // so song titles, player names and numbers stay as they are. Typed input values are left
++        // alone; their placeholders are translated.
++        public static void ApplyInGame(Transform root)
++        {
++            if (root == null) return;
++            InGameFont.EnsureDriver();
++            var typed = new HashSet<TMP_Text>();
++            foreach (var field in root.GetComponentsInChildren<TMP_InputField>(true))
++                if (field != null && field.textComponent != null) typed.Add(field.textComponent);
++            foreach (var text in root.GetComponentsInChildren<TMP_Text>(true))
++            {
++                if (text == null || typed.Contains(text)) continue;
++                string shown = InGame(text.text);
++                if (!string.Equals(shown, text.text)) text.text = shown;
++                InGameFont.Use(text);
++            }
 +        }
 +
 +        // The language the settings and in-game lookups use right now.
@@ -707,6 +1088,87 @@ index 0000000..034b948
 +fileFormatVersion: 2
 +guid: a4abd2e6cd5246158b0ce6e5f9b49204
 \ No newline at end of file
+diff --git a/Assets/OurTaiko/Runtime/Online/OnlineManager.cs b/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
+index c197e36..d5a6485 100644
+--- a/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
++++ b/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
+@@ -211,7 +211,7 @@ public async Task<bool> LoginAsync(CancellationToken cancel = default, bool refr
+                         continue;
+                     }
+                     if (cancel.IsCancellationRequested) { results.Add(who + ": cancelled"); continue; }
+-                    Activity = $"Checking {who}'s OurTaiko account…";
++                    Activity = UiText.InGameFormat("Checking {0}'s OurTaiko account…", who);
+                     try
+                     {
+                         await Center.RefreshAsync(account, cancel);
+@@ -240,7 +240,7 @@ public async Task<bool> LoginAsync(CancellationToken cancel = default, bool refr
+                             results.Add(who + " " + name + ": " + (e.IsConnected ? "no OurTaiko account sign-in" : "song list not loaded"));
+                             continue;
+                         }
+-                        Activity = $"Signing {who} in to {name}…";
++                        Activity = UiText.InGameFormat("Signing {0} in to {1}…", who, name);
+                         try
+                         {
+                             string service = e.SsoService, accountToken = account.Token;
+@@ -304,7 +304,7 @@ public async Task LoadSongListAsync(CancellationToken cancel = default, bool ref
+                     var e = endpoints[i];
+                     string name = e.Config.DisplayName;
+                     if (cancel.IsCancellationRequested) { results.Add(name + ": cancelled"); continue; }
+-                    Activity = $"Loading song list ({i + 1} / {endpoints.Count}): {name}…";
++                    Activity = UiText.InGameFormat("Loading song list ({0} / {1}): {2}…", i + 1, endpoints.Count, name);
+                     try
+                     {
+                         await Client.LoadCatalogAsync(e, cancel);
+diff --git a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
+index d3487a6..12b97e1 100644
+--- a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
++++ b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
+@@ -105,6 +105,10 @@ IEnumerator Start()
+             resultRestart.onClick.AddListener(Restart);
+             resultBack.onClick.AddListener(Back);
+             pausePanel.SetActive(false); resultPanel.SetActive(false);
++            // The pause and result panels' labels are authored in English and Japanese.
++            UiText.ApplyInGame(pausePanel.transform);
++            UiText.ApplyInGame(resultPanel.transform);
++            if (pauseButton != null && pauseButton.TryGetComponent<TMP_Text>(out var pauseLabel)) pauseLabel.text = UiText.InGame(pauseLabel.text);
+             if (drumPad != null) drumPad.gameObject.SetActive(playSettings.singlePlayerDrumPad);
+             hitAudio.PrepareAudioEffects(balloonPop, kusudamaPop, danFailed, fusumaClose, fusumaOpen);
+             betweenClip = betweenTimeline != null ? LumenClip.Parse(betweenTimeline.text) : LumenClip.Empty;
+@@ -123,7 +127,7 @@ IEnumerator Start()
+             {
+                 Debug.LogException(error);
+                 IsFinished = true; resultPanel.SetActive(true);
+-                resultText.text = "CHART COULD NOT LOAD\n<size=22>" + error.Message + "</size>";
++                resultText.text = UiText.InGame("CHART COULD NOT LOAD") + "\n<size=22>" + error.Message + "</size>";
+             }
+             if (IsFinished) yield break;
+             // The first song's doors and clock start once the curtain has opened, as PlayScene's.
+@@ -309,6 +313,7 @@ void ShowCourse()
+             view.frame.sprite = view.frames[Mathf.Clamp(course.Color, 0, view.frames.Length - 1)];
+             view.horiName.text = course.Title(language);
+             view.horiName.Squeeze(200);
++            if (view.gaugeName != null) view.gaugeName.text = UiText.InGame(view.gaugeName.text);
+             // dan_info.lua: the gauge's border plate overhangs its threshold cell by 24 px.
+             var gauge = course.Exams.FirstOrDefault(e => e.Type == DanExamType.Gauge);
+             view.gaugePlate.gameObject.SetActive(gauge != null && gauge.Course.Red > 0);
+@@ -320,7 +325,7 @@ void ShowCourse()
+                 view.gaugePlate.anchoredPosition = new Vector2(Mathf.Max(0, Mathf.Floor((float)(x - 586 + 24) + 0.5f)), view.gaugePlate.anchoredPosition.y);
+                 // The cabinet's white strip, centred on that cell over the bar (YataiDON ships it but does not draw it).
+                 if (view.gaugeCell != null) view.gaugeCell.anchoredPosition = new Vector2(Mathf.Floor((float)x - 14 + 0.5f), view.gaugeCell.anchoredPosition.y);
+-                view.gaugeValue.text = $"{gauge.Course.Red} ％{(gauge.Range == DanExamRange.Less ? "未満" : "以上")}";
++                view.gaugeValue.text = $"{gauge.Course.Red} ％{UiText.InGame(gauge.Range == DanExamRange.Less ? "未満" : "以上")}";
+             }
+             view.between.gameObject.SetActive(false);
+         }
+@@ -346,7 +351,7 @@ void ShowRow(DanPlayView.ExamRowView row, DanExam exam, DanExamView state)
+             row.frameBackAll.enabled = row.frameFrontAll.enabled = all;
+             row.overlay1.enabled = row.overlay2.enabled = !all;
+             row.icon.sprite = view.icons[(int)exam.Type];
+-            row.caption.text = state.HasBorder ? $"{state.Red} {(exam.Range == DanExamRange.Less ? "未満" : "以上")}" : "―";
++            row.caption.text = state.HasBorder ? $"{state.Red} {UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上")}" : "―";
+             float full = all ? 972 : 648;
+             if (state.Failed) Fill(row.bar, row.rainbow, view.barFail, null, full, "fail", false);
+             else Fill(row.bar, row.rainbow, BarSprite(state.BarState, false), all ? view.rainbowAll : view.rainbow, full * state.Progress, state.BarState, false);
 diff --git a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs b/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
 index d6a281c..a839b27 100644
 --- a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
@@ -897,10 +1359,21 @@ index 53e73f2..537aa81 100644
          {
              if (opening != null) { StopCoroutine(opening); opening = null; }
 diff --git a/Assets/OurTaiko/Runtime/Play/PlayScene.cs b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-index 8eb956b..1de94e5 100644
+index 8eb956b..74110b7 100644
 --- a/Assets/OurTaiko/Runtime/Play/PlayScene.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-@@ -137,7 +137,7 @@ IEnumerator Start()
+@@ -109,6 +109,10 @@ IEnumerator Start()
+             resultRestart.onClick.AddListener(Restart);
+             resultBack.onClick.AddListener(Back);
+             pausePanel.SetActive(false); resultPanel.SetActive(false);
++            // The pause and result panels' labels are authored in English and Japanese.
++            UiText.ApplyInGame(pausePanel.transform);
++            UiText.ApplyInGame(resultPanel.transform);
++            if (pauseButton != null && pauseButton.TryGetComponent<TMP_Text>(out var pauseLabel)) pauseLabel.text = UiText.InGame(pauseLabel.text);
+             // Disabled and hidden together: an inactive pad neither draws nor registers with InputManager,
+             // and pause/resume only re-enables the pads it disabled itself.
+             // The touch drum is a single-player setting; two players use the keyboard.
+@@ -137,7 +141,7 @@ IEnumerator Start()
              {
                  Debug.LogException(error);
                  IsFinished = true; resultPanel.SetActive(true);
@@ -923,10 +1396,21 @@ index 1a7d335..027fac2 100644
              if (result == Judgment.Good || result == Judgment.Ok) kind = note.Kind;
              else if (result != Judgment.Roll || note.Kind == NoteKind.Kusudama) return;
 diff --git a/Assets/OurTaiko/Runtime/Play/PracticeView.cs b/Assets/OurTaiko/Runtime/Play/PracticeView.cs
-index 6c01dfe..4ab5d7e 100644
+index 6c01dfe..d80fb4a 100644
 --- a/Assets/OurTaiko/Runtime/Play/PracticeView.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PracticeView.cs
-@@ -16,19 +16,19 @@ public void Show(PracticeStage stage, PracticeProgress progress, BranchRoute bra
+@@ -10,25 +10,30 @@ public sealed class PracticeView : MonoBehaviour
+         public TMP_Text heading, value, hint;
+         public UnityEngine.UI.Button previous, next, confirm;
+         static readonly string[] Branches = { "普通譜面", "玄人譜面", "達人譜面" };
++        // Not serialized: the saved layout stays as it is.
++        bool languageApplied;
+         public void Show(PracticeStage stage, PracticeProgress progress, BranchRoute branch)
+         {
+             panel.SetActive(true);
++            // The confirm button's 决定 is authored in the scene; heading, value and hint are
++            // written below in the in-game language. Once is enough, Show runs every frame.
++            if (!languageApplied) { UiText.ApplyInGame(panel.transform); languageApplied = true; }
              switch (stage)
              {
                  case PracticeStage.Branch:
@@ -953,10 +1437,208 @@ index 6c01dfe..4ab5d7e 100644
                      break;
              }
          }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs b/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
+index 87752d6..0aa5172 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
+@@ -2,6 +2,7 @@
+ using System.Collections.Generic;
+ using System.Linq;
+ using Newtonsoft.Json.Linq;
++using TMPro;
+ using UnityEngine;
+ using UnityEngine.UI;
+ 
+@@ -280,7 +281,7 @@ void Bind()
+ 
+             view.emblem.sprite = view.emblems[Mathf.Clamp(course.Color, 0, view.emblems.Length - 1)];
+             // The arcade plate: the name large and top to bottom, and again small across its foot.
+-            string title = course.Title(language);
++            string title = UiText.InGame(course.Title(language));
+             if (view.danName != null) view.danName.text = string.Join("\n", title.Where(c => !char.IsWhiteSpace(c)).Select(c => c.ToString()));
+             view.horiName.text = title;
+             view.horiName.Squeeze(240);
+@@ -303,9 +304,17 @@ void Bind()
+             bool best = Recorded && PreviousBest.HasValue && Result.Verdict > 0 && Result.Verdict >= PreviousBest.Value.Verdict
+                 && Result.Score > PreviousBest.Value.Score;
+             view.bestScore.gameObject.SetActive(best);
++            if (view.bestScore != null)
++            {
++                var caption = view.bestScore.Find("Caption");
++                if (caption != null && caption.TryGetComponent<TMP_Text>(out var captionText))
++                    captionText.text = UiText.InGame(captionText.text);
++            }
+             bestScoreY = view.bestScore.anchoredPosition.y;
+             if (best) view.bestScoreDigits = Digits(view.bestScoreDigits, (Result.Score - PreviousBest.Value.Score).ToString(), view.bestScoreDigitSprites, RightEdge(view.bestScoreDigits), 14.17f);
+             view.noSave.gameObject.SetActive(!Recorded);
++            // The hint is authored in Japanese.
++            UiText.ApplyInGame(view.noSave);
+             BindCelebration(course);
+         }
+ 
+@@ -460,7 +469,7 @@ double[] ExamTravel()
+ 
+         static string Caption(DanExam exam, int red)
+         {
+-            string range = exam.Range == DanExamRange.Less ? "未満" : "以上";
++            string range = UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上");
+             return exam.Type == DanExamType.Gauge ? $"{red} ％{range}" : $"{red} {range}";
+         }
+ 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
+index 236d139..ec6fbf7 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
+@@ -89,6 +89,9 @@ void Awake()
+             switcher.SceneChanging += OnSceneChanging;
+             FullIntro = switcher.FromScene == SceneSwitcher.EntryScene;
+             if (intro != null) intro.Show(DanIntroView.Frame(FullIntro, 0));
++            // The saved 演奏オプション board and the empty-page hint are authored in Japanese.
++            if (codeEntry != null) codeEntry.ApplyLanguage();
++            if (view.empty != null) view.empty.text = UiText.InGame(view.empty.text);
+             Show(Now);
+         }
+ 
+@@ -388,13 +391,13 @@ public void SubmitCode(string typed)
+         {
+             if (!IsEnteringCode || lookup != null) return;
+             string code = DanSelectPages.CleanCode(typed);
+-            if (code == null) { codeEntry.Say("英数字 6 文字のコードを入力してください"); return; }
++            if (code == null) { codeEntry.Say(UiText.InGame("英数字 6 文字のコードを入力してください")); return; }
+             string server = pages[Page].Server;
+             var endpoint = Online.OnlineManager.EnsureInstance().Client?.Endpoints
+                 .FirstOrDefault(e => string.Equals(e.Config.baseUrl.TrimEnd('/'), server, StringComparison.OrdinalIgnoreCase) && e.IsConnected);
+-            if (endpoint == null) { codeEntry.Say("サーバーに接続していません"); return; }
++            if (endpoint == null) { codeEntry.Say(UiText.InGame("サーバーに接続していません")); return; }
+             Play(sfx, don, true);
+-            codeEntry.Say("検索中…");
++            codeEntry.Say(UiText.InGame("検索中…"));
+             codeEntry.field.interactable = false;
+             lookupCode = code;
+             lookup = endpoint.RequestAsync("/api/v1/game/dans/" + code);
+@@ -410,14 +413,16 @@ void PollLookup()
+             if (task.IsFaulted || task.IsCanceled)
+             {
+                 var error = task.Exception?.InnerExceptions.FirstOrDefault();
+-                codeEntry.Say(error is Online.HttpStatusException { Status: 404 } ? "コード " + lookupCode + " の段位はありません" : "取得できませんでした: " + (error?.Message ?? "?"));
++                codeEntry.Say(error is Online.HttpStatusException { Status: 404 }
++                    ? UiText.InGameFormat("コード {0} の段位はありません", lookupCode)
++                    : UiText.InGameFormat("取得できませんでした: {0}", error?.Message ?? "?"));
+                 return;
+             }
+             DanCourseEntry entry;
+             try { entry = resolver.Resolve(DanCourse.From(Online.Json.Parse(task.Result), pages[Page].Server), pages[Page].Server + "/api/v1/game/dans/" + lookupCode); }
+             catch (Exception error) when (error is FormatException || error is Online.FanmadeException)
+             {
+-                codeEntry.Say("取得できませんでした: " + error.Message);
++                codeEntry.Say(UiText.InGameFormat("取得できませんでした: {0}", error.Message));
+                 return;
+             }
+             int index = DanSelectPages.Insert(pages[Page], entry);
+@@ -521,9 +526,9 @@ public static float CursorAlpha(double ms)
+         // the course's own name (a local or unranked course). The plate carries the full name.
+         public string ChipLabel(DanCourseEntry entry)
+         {
+-            if (entry.IsGaiden) return DanSelectPages.GaidenTitle;
++            if (entry.IsGaiden) return UiText.InGame(DanSelectPages.GaidenTitle);
+             int rank = entry.Course.DanIndex;
+-            return rank >= 0 ? DanResultFlow.RankName(rank) : entry.Course.Title(language);
++            return rank >= 0 ? UiText.InGame(DanResultFlow.RankName(rank)) : entry.Course.Title(language);
+         }
+ 
+         // The yellow board opens like the song wheel's (animations 13–18); its contents fade in last.
+@@ -552,14 +557,14 @@ void ShowCourse(DanCourseEntry entry)
+         {
+             var course = entry.Course;
+             view.frame.sprite = view.frames[Mathf.Clamp(course.Color, 0, view.frames.Length - 1)];
+-            view.horiName.text = Vertical(course.Title(language));
++            view.horiName.text = Vertical(entry.IsGaiden ? UiText.InGame(course.Title(language)) : course.Title(language));
+             if (entry.IsGaiden)
+             {
+                 // The 外伝 plate: no songs or exams, the hint where the course list would be.
+                 foreach (var row in view.songs) row.root.gameObject.SetActive(false);
+                 view.exams.gameObject.SetActive(false);
+                 view.error.gameObject.SetActive(true);
+-                view.error.text = "段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力";
++                view.error.text = UiText.InGame("段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力");
+                 return;
+             }
+             for (int i = 0; i < view.songs.Length; i++)
+@@ -570,7 +575,7 @@ void ShowCourse(DanCourseEntry entry)
+                 if (shown) ShowSong(row, i, course.Songs[i], entry.IsPlayable ? entry.Songs[i] : null);
+             }
+             view.error.gameObject.SetActive(!entry.IsPlayable);
+-            view.error.text = entry.Error ?? "";
++            view.error.text = UiText.InGame(entry.Error ?? "");
+             view.exams.gameObject.SetActive(entry.IsPlayable);
+             if (entry.IsPlayable) ShowExams(course, DanRecordStore.Shared != null ? DanRecordStore.Shared.ExamBests(DanRecordStore.Key(entry), course) : null);
+         }
+@@ -654,7 +659,7 @@ static string BestText(DanExam exam, int?[][] bests, int exam_index, int segment
+         // skin_config dan_exam_text_* (ja), as the rest of the Nijiiro screens are: "100 ％以上", "5 未満".
+         static string Caption(DanExam exam, int red)
+         {
+-            string range = exam.Range == DanExamRange.Less ? "未満" : "以上";
++            string range = UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上");
+             return exam.Type == DanExamType.Gauge ? $"{red} ％{range}" : $"{red} {range}";
+         }
+ 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs b/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
+index 77ac177..89a9fca 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
+@@ -23,7 +23,7 @@ public PageTabs(RectTransform canvas, TextMeshProUGUI style, IReadOnlyList<strin
+             {
+                 int index = i;
+                 var back = DanSelectUi.Box("Tab" + i, root, i * (Width + Gap), 0, Width, Height, new Color(0, 0, 0, 0.55f));
+-                var label = DanSelectUi.Text("Label", back.rectTransform, style, titles[i], 26, 0, 0, Width, Height);
++                var label = DanSelectUi.Text("Label", back.rectTransform, style, UiText.InGame(titles[i]), 26, 0, 0, Width, Height);
+                 var hit = back.gameObject.AddComponent<PointerRelay>();
+                 hit.Clicked = () => tapped(index);
+                 backs.Add(back);
+@@ -91,7 +91,7 @@ public CodeEntry(RectTransform canvas, TextMeshProUGUI style, Action<string> sub
+ 
+         public void Open(string pageTitle)
+         {
+-            title.text = pageTitle + " の段位コードを入力";
++            title.text = UiText.InGame(pageTitle) + UiText.InGame(" の段位コードを入力");
+             field.text = "";
+             field.interactable = true;
+             message.text = "";
+@@ -106,6 +106,12 @@ public void Close()
+         }
+ 
+         public void Say(string text) => message.text = text;
++
++        // The box's title, hint and placeholder are authored in Japanese.
++        public void ApplyLanguage()
++        {
++            if (root != null) UiText.ApplyInGame(root);
++        }
+     }
+ 
+     // The 段位 plates' lettering. The plaque art (yellow_box/frame, loading_dan/plaque, 280×560) is
+@@ -209,7 +215,7 @@ static TextMeshProUGUI Make(string name, TextMeshProUGUI caption, string text, f
+             label.outlineWidth = caption.outlineWidth;
+             label.outlineColor = caption.outlineColor;
+             label.margin = alignment == TextAlignmentOptions.Left ? new Vector4(LabelInset, 0, 0, 0) : Vector4.zero;
+-            label.text = text;
++            label.text = UiText.InGame(text);
+             return label;
+         }
+ 
 diff --git a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
-index 4b62b4b..4c7aed5 100644
+index 4b62b4b..ac96539 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+@@ -105,7 +105,7 @@ void ShowExpiredAccounts(double now)
+             if (online == null) return;
+             var seats = Enumerable.Range(0, FanmadeEndpoint.SeatCount).Where(online.TakeExpired).Select(s => (s + 1) + "P").ToArray();
+             if (seats.Length == 0) return;
+-            AccountNotice = string.Join(" and ", seats) + "'s OurTaiko sign-in has expired. Sign in again in the game settings.";
++            AccountNotice = UiText.InGameFormat("{0}'s OurTaiko sign-in has expired. Sign in again in the game settings.", string.Join(" and ", seats));
+             var bar = SkinUi.Image("AccountNotice", stage, null, 1500, 84);
+             bar.color = new Color(0, 0, 0, 0.72f);
+             bar.rectTransform.Center(960, 150);
 @@ -126,6 +126,9 @@ void Bind()
              Board = new EntryModeList(view, Clip(modeBoardTimeline), Clip(cursorGlowTimeline), Clip(modeListTimeline));
              Modes = new EntryMode[Board.Boards.Count];
@@ -967,6 +1649,27 @@ index 4b62b4b..4c7aed5 100644
              Credit = new EntryCredit(view, Clip(creditRowTimeline), Clip(creditFadeTimeline));
              Guide = new ControlGuideView(view.controlGuide, overlay);
              Nameplate = view.nameplate;
+@@ -149,6 +152,20 @@ void Bind()
+                 int index = i;
+                 view.boards[i].hitRelay.Clicked = () => TapBoard(index);
+             }
++            // The board comments, credit rows and the 2P invite are authored in Japanese. Translate
++            // exactly those labels, not the whole stage: nameplates carry player names and titles.
++            foreach (var board in view.boards)
++            {
++                if (board.info == null) continue;
++                foreach (var line in board.info)
++                    if (line != null) line.text = UiText.InGame(line.text);
++            }
++            for (int i = 0; i < view.creditLabels.Length; i++) view.creditLabels[i].text = UiText.InGame(view.creditLabels[i].text);
++            for (int i = 0; i < view.creditMessages.Length; i++) view.creditMessages[i].text = UiText.InGame(view.creditMessages[i].text);
++            for (int i = 0; i < view.creditHighlights.Length; i++) view.creditHighlights[i].text = UiText.InGame(view.creditHighlights[i].text);
++            if (view.invitePlayer != null) view.invitePlayer.text = UiText.InGame(view.invitePlayer.text);
++            if (view.inviteMessage != null) view.inviteMessage.text = UiText.InGame(view.inviteMessage.text);
++            if (view.freePlay != null) view.freePlay.text = UiText.InGame(view.freePlay.text);
+         }
+ 
+         public Image TouchArea { get; private set; }
 diff --git a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs b/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs
 index 1ac0906..423ef05 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/GlobalSettingScene.cs
@@ -1162,11 +1865,79 @@ index 0228594..3caa2dc 100644
  
          public IReadOnlyList<string> Roots => roots;
          // Charts outside box.def folders, by path; then the top-level box.def folders, which hold
+diff --git a/Assets/OurTaiko/Runtime/Scenes/OptionPanel.cs b/Assets/OurTaiko/Runtime/Scenes/OptionPanel.cs
+index d97cbee..b4412d3 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/OptionPanel.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/OptionPanel.cs
+@@ -75,6 +75,14 @@ public void Open(OptionMenu menu, double now)
+             openedAt = now; closedAt = -1; changedAt = -1;
+             root.SetAsLastSibling();
+             root.gameObject.SetActive(true);
++            // The board's title and row names are authored in Japanese; translate them once here.
++            UiText.ApplyInGame(root);
++        }
++
++        // The saved board's title and row names, translated for the current in-game language.
++        public void ApplyLanguage()
++        {
++            if (root != null) UiText.ApplyInGame(root);
+         }
+ 
+         // Starts the slide out once the menu is confirmed.
+@@ -140,12 +148,12 @@ string Value(OptionRow row)
+             switch (row)
+             {
+                 case OptionRow.Speed: return (options.speed / 10.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+-                case OptionRow.Random: return options.random == RandomMode.Kimagure ? "きまぐれ" : options.random == RandomMode.Detarame ? "でたらめ" : "しない";
++                case OptionRow.Random: return UiText.InGame(options.random == RandomMode.Kimagure ? "きまぐれ" : options.random == RandomMode.Detarame ? "でたらめ" : "しない");
+                 case OptionRow.Neiro:
+                     int slot = Menu.NeiroSlot;
+-                    return art.hitSounds != null && slot < art.hitSounds.Count ? art.hitSounds.names[slot] : "無音";
+-                case OptionRow.Skip: return "しない";
+-                default: return Menu.IsChanged(row) ? "する" : "しない";
++                    return UiText.InGame(art.hitSounds != null && slot < art.hitSounds.Count ? art.hitSounds.names[slot] : "無音");
++                case OptionRow.Skip: return UiText.InGame("しない");
++                default: return UiText.InGame(Menu.IsChanged(row) ? "する" : "しない");
+             }
+         }
+ 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
+index fca5df9..f6fea37 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
+@@ -34,6 +34,7 @@ void Awake()
+             online = OnlineManager.EnsureInstance();
+             card.alpha = 0;
+             progress.text = "";
++            if (hint != null) hint.text = UiText.InGame(hint.text);
+             touch.Clicked = Skip;
+             cancel = new CancellationTokenSource();
+         }
+@@ -57,7 +58,7 @@ void Update()
+             card.alpha = fadeSeconds <= 0 ? 1 : Mathf.Clamp01((float)(elapsed / fadeSeconds));
+             if (!work.IsCompleted)
+             {
+-                progress.text = Skipped ? "Cancelling…" : online.Activity;
++                progress.text = UiText.InGame(Skipped ? "Cancelling…" : online.Activity);
+                 if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) Skip();
+                 return;
+             }
 diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
-index d4e4570..2a1214f 100644
+index d4e4570..8ec4ce6 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
-@@ -35,11 +35,11 @@ public void Bind(PlayResult result)
+@@ -29,17 +29,22 @@ public void Bind(PlayResult result)
+         {
+             boundResult = result;
+             calibrationError = null;
++            // The score and timing pages are siblings of the navigation strip, so the scene's own
++            // translation pass does not reach them. Translate their authored captions (成绩,
++            // 判定详情, the axis and metric names) before the values below are written.
++            if (scorePage != null) UiText.ApplyInGame(scorePage.transform);
++            if (detailPage != null) UiText.ApplyInGame(detailPage.transform);
+             var data = result.AutoPlay ? null : result.Timing;
+             histogram.Show(data);
+             string Number(double? value) => value.HasValue ? value.Value.ToString("0.0", CultureInfo.InvariantCulture) + " ms" : "—";
              mean.text = data?.MeanMs is double m ? m.ToString("+0.0;-0.0;0.0", CultureInfo.InvariantCulture) + " ms" : "—";
              deviation.text = Number(data?.StandardDeviationMs);
              absolute.text = Number(data?.MeanAbsoluteMs);
@@ -1182,7 +1953,7 @@ index d4e4570..2a1214f 100644
              for (int i = 0; i < yLabels.Length; i++) yLabels[i].text = (histogram.AxisMaximum * i / 4).ToString();
              Details = false; changedAt = double.NegativeInfinity;
              DrawPages();
-@@ -57,7 +57,7 @@ public bool ApplyOffset(bool audio)
+@@ -57,7 +62,7 @@ public bool ApplyOffset(bool audio)
              }
              catch (Exception error)
              {
@@ -1191,7 +1962,7 @@ index d4e4570..2a1214f 100644
                  Debug.LogWarning("Could not save timing adjustment: " + error.Message);
                  DrawCalibration();
                  return false;
-@@ -72,19 +72,19 @@ void DrawCalibration()
+@@ -72,19 +77,19 @@ void DrawCalibration()
              bool canAudio = calibration?.CanApply(current, true) == true;
              bool canJudge = calibration?.CanApply(current, false) == true;
              string Recommendation(int value, int? target) => target.HasValue ? Milliseconds(value) + " → " + Milliseconds(target.Value) : "—";
@@ -1220,7 +1991,7 @@ index d4e4570..2a1214f 100644
          }
          public void SetPage(bool details, int moveDirection)
          {
-@@ -92,7 +92,8 @@ public void SetPage(bool details, int moveDirection)
+@@ -92,7 +97,8 @@ public void SetPage(bool details, int moveDirection)
              Details = details; direction = moveDirection < 0 ? -1 : 1; changedAt = GameTimeline.FrameTime;
              DrawPages();
          }
@@ -1230,7 +2001,7 @@ index d4e4570..2a1214f 100644
          void Update() => DrawPages();
          void DrawPages()
          {
-@@ -114,7 +115,7 @@ void Page(CanvasGroup group, bool entering)
+@@ -114,7 +120,7 @@ void Page(CanvasGroup group, bool entering)
                  ((RectTransform)offsetControls.transform).anchoredPosition = ((RectTransform)detailPage.transform).anchoredPosition;
                  DrawCalibration();
              }
@@ -1239,21 +2010,378 @@ index d4e4570..2a1214f 100644
              for (int i = 0; i < dots.Length; i++) dots[i].color = i == (Details ? 1 : 0)
                  ? new Color32(238, 82, 39, 255) : new Color32(180, 172, 152, 255);
          }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs
+new file mode 100644
+index 0000000..2d0857d
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs
+@@ -0,0 +1,89 @@
++using System.Collections.Generic;
++using System.IO;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // The result board's difficulty tabs and judge labels are painted into two sprites, so the
++    // translation table cannot reach them. The patch build embeds Simplified and Traditional copies
++    // of those sprites (tools/make-result-art.py); Japanese, and English/Korean which show Japanese
++    // in game, keep the sprites shipped with the app.
++    static class ResultArt
++    {
++        const string Prefix = "OurTaiko.Art.";
++        static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
++        static readonly Dictionary<string, Texture2D> Textures = new Dictionary<string, Texture2D>();
++        static bool missing;
++
++        public static Sprite Difficulty(int index)
++        {
++            var texture = Sheet("difficulty");
++            if (texture == null) return null;
++            index = Mathf.Clamp(index, 0, 4);
++            string key = "difficulty:" + UiText.InGameLanguage(UiText.Language) + ":" + index;
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var rect = new Rect(index * 320, 0, 320, 96);
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "ResultDifficulty" + index;
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        public static Sprite Score() => Whole("score", new Rect(0, 0, 420, 48));
++
++        // clear_ja.png is a 120x40 sheet whose クリア sprite sits at (0, 4) and is 64x31.
++        public static Sprite Clear(bool dark) =>
++            Whole(dark ? "clear_dark" : "clear", new Rect(0, 4, 64, 31));
++
++        static Sprite Whole(string name, Rect rect)
++        {
++            var texture = Sheet(name);
++            if (texture == null) return null;
++            string key = name + ":" + UiText.InGameLanguage(UiText.Language);
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "Result" + name;
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        public static Sprite JudgeLabels()
++        {
++            var texture = Sheet("judge");
++            if (texture == null) return null;
++            string key = "judge:" + UiText.InGameLanguage(UiText.Language);
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var rect = new Rect(0, 0, texture.width, texture.height);
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "ResultJudgeLabels";
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        static Texture2D Sheet(string name)
++        {
++            string language = UiText.InGameLanguage(UiText.Language);
++            if (language != "zh" && language != "zh_tw") return null;
++            if (missing) return null;
++            string key = name + ":" + language;
++            if (Textures.TryGetValue(key, out var cached)) return cached;
++            var texture = Read(name + "." + language);
++            if (texture == null) { missing = true; return null; }
++            Textures[key] = texture;
++            return texture;
++        }
++
++        static Texture2D Read(string file)
++        {
++            using var stream = typeof(ResultArt).Assembly.GetManifestResourceStream(Prefix + file + ".png");
++            if (stream == null) return null;
++            using var memory = new MemoryStream();
++            stream.CopyTo(memory);
++            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
++            if (!texture.LoadImage(memory.ToArray())) return null;
++            texture.wrapMode = TextureWrapMode.Clamp;
++            texture.filterMode = FilterMode.Bilinear;
++            return texture;
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta
+new file mode 100644
+index 0000000..75542af
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta
+@@ -0,0 +1,11 @@
++fileFormatVersion: 2
++guid: 5f6b2c1d9a4e47b08c3d2e1f0a9b8c7d
++MonoImporter:
++  externalObjects: {}
++  serializedVersion: 2
++  defaultReferences: []
++  executionOrder: 0
++  icon: {instanceID: 0}
++  userData: 
++  assetBundleName: 
++  assetBundleVariant: 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs b/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
+index 6393bbf..5fcd749 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
+@@ -146,7 +146,9 @@ void DrawGauge(double now)
+             DrawRainbow(full, now);
+ 
+             bool lit = shown >= clearCell - 1 && cleared;
+-            captionImage.sprite = lit ? scene.clearCaption : scene.clearCaptionDark;
++            captionImage.sprite = lit
++                ? ResultArt.Clear(false) ?? scene.clearCaption
++                : ResultArt.Clear(true) ?? scene.clearCaptionDark;
+             soulImage.sprite = lit ? scene.soul : scene.soulDark;
+             // tamashii_gage fever: flame cel, fade-in and sheen sampled from anim/fever_fire.
+             fireImage.enabled = sheenImage.enabled = false;
+@@ -273,15 +275,34 @@ void Bind()
+             var view = View;
+             successImage = twoPlayers && view.successTwoPlayers != null ? view.successTwoPlayers : view.success;
+             if (view.successTwoPlayers != null) (successImage == view.success ? view.successTwoPlayers : view.success).Alpha(0);
+-            view.difficulty.sprite = scene.difficulties[Math.Min(Math.Max((int)Result.Difficulty, 0), scene.difficulties.Length - 1)];
++            int difficultyIndex = Math.Min(Math.Max((int)Result.Difficulty, 0), scene.difficulties.Length - 1);
++            view.difficulty.sprite = ResultArt.Difficulty(difficultyIndex) ?? scene.difficulties[difficultyIndex];
+             judgeImages = new Image[view.judgeRows.Length][];
+             for (int row = 0; row < judgeImages.Length; row++) judgeImages[row] = view.judgeRows[row].digits;
++            // The judge labels are painted into one sprite; swap in the localized sheet.
++            var judgeLabels = view.difficulty != null && view.difficulty.transform.parent != null
++                ? view.difficulty.transform.parent.Find("JudgeLabels") : null;
++            var judgeArt = ResultArt.JudgeLabels();
++            if (judgeArt != null && judgeLabels != null && judgeLabels.TryGetComponent<Image>(out var judgeImage))
++                judgeImage.sprite = judgeArt;
++            var scoreLabel = view.difficulty != null && view.difficulty.transform.parent != null
++                ? view.difficulty.transform.parent.Find("ScoreLabel") : null;
++            var scoreArt = ResultArt.Score();
++            if (scoreArt != null && scoreLabel != null && scoreLabel.TryGetComponent<Image>(out var scoreImage))
++                scoreImage.sprite = scoreArt;
+             scoreOutline = view.scoreOutline;
+             scoreFill = view.scoreFill;
+ 
+             highScoreGroup = view.highScore;
+             highScoreAlpha = view.highScoreGroup;
+             highScoreBase = highScoreGroup.anchoredPosition;
++            // The caption above the difference is authored in Japanese.
++            var highScoreCaption = highScoreGroup.Find("Caption");
++            if (highScoreCaption != null && highScoreCaption.TryGetComponent<TMP_Text>(out var captionText))
++            {
++                captionText.text = UiText.InGame(captionText.text);
++                InGameFont.Use(captionText);
++            }
+             highScoreNumber = view.highScoreDigits;
+             string difference = Result.ScoreDifference.ToString();
+             for (int i = 0; i < highScoreNumber.Length; i++)
+@@ -298,7 +319,8 @@ void Bind()
+             var messages = Seat == 1 && scene.messages2P != null && scene.messages2P.Length > 0 ? scene.messages2P : scene.messages;
+             messageImage.sprite = messages[(int)Result.Message];
+             messageText = view.messageText;
+-            messageText.text = ResultScene.MessageTexts[(int)Result.Message];
++            messageText.text = UiText.InGame(ResultScene.MessageTexts[(int)Result.Message]);
++            InGameFont.Use(messageText);
+ 
+             unfilledImage = view.unfilled;
+             var unfilled = Seat == 1 && scene.unfilled2P != null && scene.unfilled2P.Length > 0 ? scene.unfilled2P : scene.unfilled;
+@@ -321,5 +343,6 @@ void Bind()
+             soulImage = view.soul;
+             sheenImage = view.soulSheen;
+         }
++
+     }
+ }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs b/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
+index 4d4a345..efd4996 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
+@@ -330,7 +330,16 @@ void Bind()
+             fadeIn = new ResultBackground(view.fadeIn, bgClip, Clip(fujiTimeline));
+             view.songTitle.text = Result.Title;
+             view.songTitle.Squeeze(view.songTitle.rectTransform.sizeDelta.x);
+-            view.songNumber.text = Math.Max(1, switcher.SongsPlayed) + "曲目";
++            view.songNumber.text = UiText.InGameFormat("{0}曲目", Math.Max(1, switcher.SongsPlayed));
++            InGameFont.Use(view.songNumber);
++            // The analysis pages' captions, axes and adjustment titles are authored in Chinese.
++            if (view.analysis != null) UiText.ApplyInGame(view.analysis.transform);
++            if (view.secondAnalysis != null) UiText.ApplyInGame(view.secondAnalysis.transform);
++            if (view.freePlay != null)
++            {
++                view.freePlay.text = UiText.InGame(view.freePlay.text);
++                InGameFont.Use(view.freePlay);
++            }
+ 
+             // ResultScreen::draw_overlay: coin_overlay's credit line (result shows no chip or invite), over the wipe.
+             if (overlay != null) Coins = new CoinOverlayView(overlay, view.freePlay, null, null, null, null);
 diff --git a/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs b/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
-index 8cdb0d0..b689be7 100644
+index 8cdb0d0..2e536e5 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/ServerLoginScene.cs
-@@ -89,7 +89,7 @@ void ShowServer(int index)
+@@ -89,15 +89,17 @@ void ShowServer(int index)
              ServerIndex = index;
              outcomes.Add(Outcome.None);
              var server = Server;
 -            view.header.text = "サーバーログイン";
 +            view.header.text = UiText.InGame("サーバーログイン");
++            // The field labels, placeholders and the buttons are authored in Japanese.
++            UiText.ApplyInGame(view.transform);
              view.serverName.text = server.DisplayName;
              view.serverUrl.text = server.baseUrl;
              view.progress.text = servers.Count > 1 ? $"{index + 1} / {servers.Count}" : "";
+             view.username.text = server.username ?? "";
+             view.password.text = server.password ?? "";
+-            view.ShowMessage(switcher.PracticeMode
++            view.ShowMessage(UiText.InGame(switcher.PracticeMode
+                 ? "ログインすると過去のスコアを確認できます。練習のスコアは保存しません。"
+-                : "ログインするとスコアがサーバーに保存されます。ゲストはスコアを保存しません。");
++                : "ログインするとスコアがサーバーに保存されます。ゲストはスコアを保存しません。"));
+             Focus = server.HasCredentials ? ServerLoginView.Item.Login : ServerLoginView.Item.Username;
+             view.ShowFocus(Focus, false);
+             if (server.autoLogin && server.HasCredentials) Connect(guest: false);
+@@ -117,7 +119,7 @@ void Update()
+             if (IsBusy)
+             {
+                 var (done, total) = online.Client.CatalogProgress;
+-                if (total > 0) view.ShowMessage($"曲リストを読み込み中… {done} / {total}");
++                if (total > 0) view.ShowMessage(UiText.InGameFormat("曲リストを読み込み中… {0} / {1}", done, total));
+                 if (back) CancelRequest();
+                 return;
+             }
+@@ -183,7 +185,7 @@ public void Activate(ServerLoginView.Item item)
+                     Play(don);
+                     if (string.IsNullOrEmpty(view.username.text) || string.IsNullOrEmpty(view.password.text))
+                     {
+-                        view.ShowMessage("ユーザー名とパスワードを入力してください。", error: true);
++                        view.ShowMessage(UiText.InGame("ユーザー名とパスワードを入力してください。"), error: true);
+                         break;
+                     }
+                     Connect(guest: false);
+@@ -216,7 +218,7 @@ async void Connect(bool guest)
+             cancel = new CancellationTokenSource();
+             online.Client.ResetCatalogProgress();
+             var endpoint = online.Client.Add(config);
+-            view.ShowMessage(guest ? "サーバーに接続中…" : "ログイン中…");
++            view.ShowMessage(UiText.InGame(guest ? "サーバーに接続中…" : "ログイン中…"));
+             request = online.Client.ConnectAsync(endpoint, guest, cancel.Token);
+             view.ShowFocus(Focus, true);
+             try
+@@ -226,8 +228,8 @@ async void Connect(bool guest)
+                 if (guest) online.Remember(index, Server.username, Server.password, autoLogin: false);
+                 else online.Remember(index, config.username, config.password, autoLogin: true);
+                 outcomes[ServerIndex] = guest ? Outcome.Guest : Outcome.LoggedIn;
+-                string who = guest ? "ゲスト" : endpoint.Nickname;
+-                view.ShowMessage($"{who}として接続しました（{endpoint.ChartCount} 曲）", success: true);
++                string who = guest ? UiText.InGame("ゲスト") : endpoint.Nickname;
++                view.ShowMessage(UiText.InGameFormat("{0}として接続しました（{1} 曲）", who, endpoint.ChartCount), success: true);
+                 advanceAt = GameTimeline.FrameTime + successSeconds;
+             }
+             catch (Exception error)
+@@ -255,14 +257,14 @@ void CancelRequest()
+         // fanmade.cpp's codes, worded for the player (the code stays visible for reports).
+         public static string Describe(Exception error, bool cancelled)
+         {
+-            if (cancelled) return "キャンセルしました。";
++            if (cancelled) return UiText.InGame("キャンセルしました。");
+             if (error is HttpStatusException status)
+                 switch (status.Status)
+                 {
+-                    case 401: case 403: return "ユーザー名またはパスワードが正しくありません。";
+-                    case 429: return "ログインの試行回数が多すぎます。しばらくしてから再試行してください。";
++                    case 401: case 403: return UiText.InGame("ユーザー名またはパスワードが正しくありません。");
++                    case 429: return UiText.InGame("ログインの試行回数が多すぎます。しばらくしてから再試行してください。");
+                 }
+-            return "接続できませんでした：" + error.Message;
++            return UiText.InGame("接続できませんでした：") + error.Message;
+         }
+ 
+         void Next()
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SettingManager.cs b/Assets/OurTaiko/Runtime/Scenes/SettingManager.cs
+index 16d8a6c..1c73170 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SettingManager.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SettingManager.cs
+@@ -81,6 +81,7 @@ void Apply(GameSettings settings)
+         {
+             Settings = settings;
+             Settings.general.keyboard.Apply();
++            InGameFont.EnsureDriver();
+             Changed?.Invoke(Settings);
+         }
+ 
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongLoadingScene.cs b/Assets/OurTaiko/Runtime/Scenes/SongLoadingScene.cs
+index 2b4c776..2dee96d 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongLoadingScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongLoadingScene.cs
+@@ -49,7 +49,7 @@ IEnumerator Start()
+                 yield return Download(switcher, online, song);
+                 if (Error != null)
+                 {
+-                    switcher.SetCoverStatus(Error, new Color(1, 0.35f, 0.35f));
++                    switcher.SetCoverStatus(UiText.InGame(Error), new Color(1, 0.35f, 0.35f));
+                     double failedAt = GameTimeline.FrameTime;
+                     while (GameTimeline.FrameTime - failedAt < errorSeconds || switcher.IsSwitching) yield return null;
+                     switcher.SwitchScene(switcher.ReturnScene);
+@@ -69,7 +69,7 @@ IEnumerator Start()
+             yield return DecodeAudio(song);
+             if (Error != null)
+             {
+-                switcher.SetCoverStatus(Error, new Color(1, 0.35f, 0.35f));
++                switcher.SetCoverStatus(UiText.InGame(Error), new Color(1, 0.35f, 0.35f));
+                 yield return new WaitForSecondsRealtime(errorSeconds);
+                 while (switcher.IsSwitching) yield return null;
+                 switcher.SwitchScene(switcher.ReturnScene);
+@@ -125,7 +125,7 @@ IEnumerator LoadDan(SceneSwitcher switcher, DanRun dan)
+             if (Error != null)
+             {
+                 dan.Release();
+-                switcher.SetCoverStatus(Error, new Color(1, 0.35f, 0.35f));
++                switcher.SetCoverStatus(UiText.InGame(Error), new Color(1, 0.35f, 0.35f));
+                 double failedAt = GameTimeline.FrameTime;
+                 while (GameTimeline.FrameTime - failedAt < errorSeconds || switcher.IsSwitching) yield return null;
+                 switcher.SwitchScene(SceneSwitcher.DanSelectScene);
+@@ -165,11 +165,11 @@ IEnumerator Download(SceneSwitcher switcher, OnlineManager online, SongDefinitio
+             {
+                 var error = task.Exception?.GetBaseException();
+                 Debug.LogWarning("Online chart download failed: " + error?.Message);
+-                Error = error is FanmadeException ? error.Message : "DOWNLOAD_FAILED";
++                Error = error is FanmadeException ? error.Message : UiText.InGame("DOWNLOAD_FAILED");
+                 yield break;
+             }
+             var (text, audio, chart) = task.Result;
+-            switcher.SetCoverStatus("音源を読み込み中…", Color.white);
++            switcher.SetCoverStatus(UiText.InGame("音源を読み込み中…"), Color.white);
+             online.SetPrepared(song, chart, text, null);
+             song.audioPath = audio;
+             song.moviePath = chart.MoviePath;
+@@ -180,20 +180,20 @@ IEnumerator Download(SceneSwitcher switcher, OnlineManager online, SongDefinitio
+         // The download card's lines (chart / audio, and the movie when one is fetched) as one status text.
+         public static string Describe(DownloadProgress progress)
+         {
+-            if (progress.Step == DownloadProgress.Stage.Checking) return "サーバーを確認中…";
+-            if (progress.Step == DownloadProgress.Stage.Preparing || progress.Step == DownloadProgress.Stage.Ready) return "譜面を準備中…";
+-            string text = "譜面 " + Describe(progress.Chart) + "　音源 " + Describe(progress.Audio);
+-            return progress.Movie == null ? text : text + "　映像 " + Describe(progress.Movie);
++            if (progress.Step == DownloadProgress.Stage.Checking) return UiText.InGame("サーバーを確認中…");
++            if (progress.Step == DownloadProgress.Stage.Preparing || progress.Step == DownloadProgress.Stage.Ready) return UiText.InGame("譜面を準備中…");
++            string text = UiText.InGame("譜面") + " " + Describe(progress.Chart) + "　" + UiText.InGame("音源") + " " + Describe(progress.Audio);
++            return progress.Movie == null ? text : text + "　" + UiText.InGame("映像") + " " + Describe(progress.Movie);
+         }
+ 
+         static string Describe(FileProgress file)
+         {
+             switch (file.Status)
+             {
+-                case FileProgress.State.Waiting: return "待機中";
+-                case FileProgress.State.Verifying: return "確認中";
+-                case FileProgress.State.Cached: return "キャッシュ済み";
+-                case FileProgress.State.Complete: return "完了";
++                case FileProgress.State.Waiting: return UiText.InGame("待機中");
++                case FileProgress.State.Verifying: return UiText.InGame("確認中");
++                case FileProgress.State.Cached: return UiText.InGame("キャッシュ済み");
++                case FileProgress.State.Complete: return UiText.InGame("完了");
+                 default:
+                     return file.Total > 0
+                         ? $"{file.Received * 100 / file.Total}% ({Size(file.Received)}/{Size(file.Total)})"
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs b/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
-index b3c969c..5599eb3 100644
+index b3c969c..15eaff1 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSearchView.cs
 @@ -30,7 +30,13 @@ public sealed class SongSearchView : MonoBehaviour, IPointerClickHandler
@@ -1280,12 +2408,13 @@ index b3c969c..5599eb3 100644
 -            labels[0].text = Words("Difficulty", "むずかしさ", "难度"); labels[1].text = Words("Stars", "★の数", "星级");
 -            labels[2].text = Words("Sort by", "表示順", "排序"); labels[3].text = Words("Keyword", "キーワード", "关键词");
 -            ((TMP_Text)keyword.placeholder).text = Words("Title / Subtitle / Maker", "曲名 / サブタイトル / 譜面作者", "曲名 / 副标题 / 谱师");
+-            values[0].text = difficulty == 0 ? all : new[] { "Easy", "Normal", "Hard", "Oni", "Ura" }[difficulty - 1];
 +            title.text = Words("Song search", "曲をさがす", "歌曲搜索", "歌曲搜尋");
 +            string all = Words("All", "すべて", "全部", "全部");
 +            labels[0].text = Words("Difficulty", "むずかしさ", "难度", "難度"); labels[1].text = Words("Stars", "★の数", "星级", "星級");
 +            labels[2].text = Words("Sort by", "表示順", "排序", "排序"); labels[3].text = Words("Keyword", "キーワード", "关键词", "關鍵詞");
 +            ((TMP_Text)keyword.placeholder).text = Words("Title / Subtitle / Maker", "曲名 / サブタイトル / 譜面作者", "曲名 / 副标题 / 谱师", "曲名 / 副標題 / 譜師");
-             values[0].text = difficulty == 0 ? all : new[] { "Easy", "Normal", "Hard", "Oni", "Ura" }[difficulty - 1];
++            values[0].text = difficulty == 0 ? all : UiText.InGame(new[] { "Easy", "Normal", "Hard", "Oni", "Ura" }[difficulty - 1]);
              values[1].text = level == 0 ? all : "★ " + level;
              values[2].text = order == 0 ? Words("Default", "いつもどおり", "通常") : order == 1 ? Words("Not FC first", "未フルコンボ優先", "未 FC 优先") : Words("Not AP first", "未ドンダフル優先", "未 AP 优先");
 -            apply.GetComponentInChildren<TMP_Text>().text = busy ? Words("Searching…", "検索中…", "搜索中…") : Words("Search", "検索", "搜索");
@@ -1324,18 +2453,56 @@ index 742a2e5..fb8ca02 100644
          static WheelItem NewSearchItem() => new WheelItem { Kind = ItemKind.Search };
  
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
-index 4876231..10a502e 100644
+index 4876231..028060a 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
-@@ -107,7 +107,7 @@ void BindFolder(Board board, FolderSlot slot)
+@@ -105,9 +105,9 @@ void BindFolder(Board board, FolderSlot slot)
+             item.panelClosed.Alpha(1);
+             item.panelOpen.enabled = false;
              item.charaLeft.enabled = item.charaRight.enabled = false;
-             item.title.text = back ? SongSelectManager.BackLabel : search ? Manager.SearchFolderTitle : folder.Title;
+-            item.title.text = back ? SongSelectManager.BackLabel : search ? Manager.SearchFolderTitle : folder.Title;
++            item.title.text = back ? UiText.InGame(SongSelectManager.BackLabel) : search ? Manager.SearchFolderTitle : folder.Title;
              item.title.Squeeze(860);
 -            item.count.text = back ? "" : search ? Manager.SearchDescription(board.Item) : $"{folder.SongCount} songs　{folder.ServerName}";
 +            item.count.text = back ? "" : search ? Manager.SearchFolderDescription : $"{folder.SongCount} {UiText.InGame("songs")}　{folder.ServerName}";
              if (!back)
              {
                  item.panelOpen.sprite = folderBoards[board.Genre];
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+index bd074b8..2631e13 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+@@ -313,7 +313,7 @@ void FillCard(CourseCard card, Board board, Difficulty difficulty, bool changing
+             card.Board.color = new Color(1, 1, 1, has ? 1 : 0.4f);
+             bool details = has && !changing;
+             card.Name.enabled = has;
+-            card.Name.text = ChipNames[(int)difficulty];
++            card.Name.text = UiText.InGame(ChipNames[(int)difficulty]);
+             foreach (var image in new[] { card.Crown, card.Star, card.Level, card.Bar }) image.enabled = details;
+             card.Branch.enabled = details && info.IsBranching;
+             for (int k = 0; k < card.Dots.Length; k++) card.Dots[k].enabled = details && k < Math.Min(10, info.Level);
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+index 75d0fd1..f266041 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+@@ -201,6 +201,17 @@ void Awake()
+             coursePanel.gameObject.SetActive(false);
+             DrawOverlays(0);
+             if (view.search != null) view.search.Bind(Manager);
++            // Authored Japanese labels outside the song boards: the best-score caption and the 2P invite.
++            if (view.bestScore != null)
++            {
++                var caption = view.bestScore.transform.Find("Caption");
++                if (caption != null && caption.TryGetComponent<TMP_Text>(out var label)) label.text = UiText.InGame(label.text);
++            }
++            if (view.overlays != null)
++            {
++                if (view.overlays.invitePlayer != null) view.overlays.invitePlayer.text = UiText.InGame(view.overlays.invitePlayer.text);
++                if (view.overlays.inviteMessage != null) view.overlays.inviteMessage.text = UiText.InGame(view.overlays.inviteMessage.text);
++            }
+         }
+ 
+         void Start()
 diff --git a/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs
 new file mode 100644
 index 0000000..c8c52c7

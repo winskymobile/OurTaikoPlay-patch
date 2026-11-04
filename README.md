@@ -1,6 +1,6 @@
 # OurTaikoPlay 补丁包 · play-preferences
 
-给已安装的 **OurTaikoPlay.app**（1.0-349，Unity 6000.6.7f1 + Mono 后端）打上
+给已安装的 **OurTaikoPlay.app**（1.0-349 ~ 1.0.1-411，Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打上
 `play-preferences` 补丁，**不需要 Unity 编辑器**。
 
 游戏逻辑全在 `Contents/Resources/Data/Managed/OurTaiko.Runtime.dll` 里。补丁的落地方式：
@@ -16,15 +16,20 @@
 | 结算页面 | 难度页签、判定标签、成绩 / 通关、曲目序号等日文切图与文本按简繁重绘；简繁结算贴图同样嵌入 DLL |
 | 飞出音符绘制 | 显示设置新增「飞出音符」（图片 / 精灵）与「飞出数量」（高 / 中 / 低） |
 
-保留上游的背景影片设置（背景影片、影片时轨道不透明度），显示页共 6 项。
+保留上游的背景影片设置（背景影片、影片时轨道不透明度），加上飞出音符两项，显示页共 8 项。
+
+上游从 1.0-400 起把设置场景换成了运行时搭的 `SettingsOverlay`（`Runtime/Settings/`）：
+页面 / 分组 / 行的标题与说明在 `SettingsCatalog` 里按英文写好，由 `UiText.Settings()` 在
+构建时翻译，因此译文表是唯一的文案来源；语言行改回「语言」，同时管界面与游戏内文字。
 
 ## 目录
 
 ```
-play-preferences.patch                    完整补丁（基于 upstream/main @ 69bb7a7，兼容 1.0-349 / 1.0-350）
+play-preferences.patch                    完整补丁（基于 upstream/main @ d0209f4，兼容 1.0-349 ~ 1.0.1-411）
 FOT-OedKtrStdE.otf                        简繁界面与结算切图字体（大江户勘亭流，补了 6 个繁体 cmap 别名；构建时嵌入 DLL）
 play-preferences-upstream-e8fc18a.patch   上一版存档（基线 e8fc18a）
 README.md                                 本文
+tools/patch-app.sh                        一条命令：存原版 → 补丁重放到最新上游 → 编译 → 两项闸门 → 安装
 tools/build-runtime-dll.sh                用 app 自带程序集编译 OurTaiko.Runtime.dll（嵌入字体与简繁结算贴图）
 tools/make-result-art.py                  用 FOT-OedKtrStdE.otf 生成简繁结算页面贴图
 tools/make-font.py                        从大江户勘亭流.otf 重新生成 FOT-OedKtrStdE.otf（需要 fontTools）
@@ -53,7 +58,31 @@ tools/install.sh
 
 ## APP 更新后重新打补丁
 
-官方更新会覆盖 `OurTaiko.Runtime.dll`，补丁会失效：
+官方更新会覆盖 `OurTaiko.Runtime.dll`，补丁会失效。正常情况一条命令就够：
+
+```bash
+tools/patch-app.sh --launch
+```
+
+它会自己判断要做哪一步：版本号 → 原版 DLL 有没有存过 → 上游有没有新提交 →
+补丁要不要重放 → 编译 → 布局 / 译文两道闸门 → 安装（备份旧 DLL、合并 `settings.json`）。
+
+常用参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--app <路径>` | 换一个 .app（默认 `/Applications/OurTaikoPlay.app`） |
+| `--source <路径>` | 换补丁源码树（默认 `../OurTaikoPlay`） |
+| `--no-fetch` | 不拉上游（离线，或上游 ref 已在本地） |
+| `--no-install` | 只编译和检查，不安装 |
+| `--from-tree` | 把当前源码树认作新补丁（手改代码、解完冲突后用它） |
+| `--launch` | 装完启动游戏 |
+
+补丁重放冲突时会停下列出 `MISSING`（上游已删除该文件）/ `CONFLICT`（带冲突标记），
+改完再跑 `tools/patch-app.sh --from-tree`。上游大改设置界面那次（1.0.1-411）就是
+`MISSING` 一整组文件，需要把改动移植到替代文件里。
+
+不想用脚本时，手工步骤还是这些：
 
 ```bash
 # 1) 重新留原版 DLL（版本号会写进文件名）
@@ -62,7 +91,7 @@ tools/save-original.sh
 # 2) 把补丁重放到新的上游代码（有冲突会列出来）
 tools/update-source.sh upstream/main "/Users/vincent/Documents/开发/OurTaikoPlay"
 #    在 ../OurTaikoPlay 里解冲突 → 重新生成 play-preferences.patch：
-#    cd ../OurTaikoPlay && git diff main > ../OurTaikoPlay-patch/play-preferences.patch
+#    cd ../OurTaikoPlay && git diff upstream/main > ../OurTaikoPlay-patch/play-preferences.patch
 
 # 3) 用新装 app 自带的程序集重新编译
 tools/build-runtime-dll.sh "/Users/vincent/Documents/开发/OurTaikoPlay" /Applications/OurTaikoPlay.app
@@ -107,5 +136,6 @@ tools/restore.sh path/to/other.dll    # 指定某个 DLL
   原包本身是 adhoc 签名，实测不影响启动。
 - 首次启动迁移后，数据在 `~/Library/Application Support/OurTaiko/OurTaikoPlay/`；
   `.app` 内的旧文件保留，可自行删除。
-- 编译依赖 .NET SDK（`dotnet`），`check-layout.sh` 依赖 `tools/fieldcheck`（首次会 `dotnet build`）。
+- 编译依赖 .NET SDK（`dotnet`）和带 Pillow 的 `python3`（`make-result-art.py` 画简繁结算贴图）。
+  `check-layout.sh` 依赖 `tools/fieldcheck`（首次会 `dotnet build`）。
 - `backup/*.dll`、`tools/build/`、`tools/fieldcheck/bin|obj/` 是本机产物，不进仓库。

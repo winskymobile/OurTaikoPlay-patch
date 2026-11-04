@@ -54,12 +54,20 @@ RESOURCES=(
 )
 echo "font   $FONT"
 
+# A stale DLL from an earlier build must never pass for a successful one.
+rm -f "$OUT/OurTaiko.Runtime.dll"
+set +e
 dotnet "$CSC" -nologo -target:library -langversion:9 -nostdlib -optimize+ -debug- \
   -define:UNITY_2023_3_OR_NEWER -define:UNITY_6000_0_OR_NEWER \
   -define:UNITY_STANDALONE -define:UNITY_STANDALONE_OSX -define:ENABLE_MONO \
   "${RESOURCES[@]}" \
-  -out:"$OUT/OurTaiko.Runtime.dll" "@$RSP" 2>&1 | grep -v 'warning CS' || true
-
-[ -f "$OUT/OurTaiko.Runtime.dll" ] || { echo "build failed" >&2; exit 1; }
+  -out:"$OUT/OurTaiko.Runtime.dll" "@$RSP" > "$OUT/compile.log" 2>&1
+STATUS=$?
+set -e
+grep -v 'warning CS' "$OUT/compile.log" | grep -E 'error|warning CS8' || true
+if [ "$STATUS" -ne 0 ] || [ ! -f "$OUT/OurTaiko.Runtime.dll" ]; then
+  echo "build failed (csc exit $STATUS); see $OUT/compile.log" >&2
+  exit 1
+fi
 shasum -a 256 "$OUT/OurTaiko.Runtime.dll"
 echo "built $OUT/OurTaiko.Runtime.dll"

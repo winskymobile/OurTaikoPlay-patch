@@ -34,7 +34,11 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 [ -f "$TARGET" ] || { echo "no $TARGET" >&2; exit 1; }
 mkdir -p "$BACKUP"
 
-ORIGINAL=$(ls "$BACKUP"/*.original.dll 2>/dev/null | tail -1 || true)
+# The original of the version being installed: another version's DLL has a different
+# MonoBehaviour layout, and comparing against it would fail the gate for no reason.
+VERSION=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "")
+ORIGINAL="$BACKUP/OurTaiko.Runtime.$VERSION.original.dll"
+[ -f "$ORIGINAL" ] || ORIGINAL=$(ls "$BACKUP"/*.original.dll 2>/dev/null | tail -1 || true)
 if [ -n "$ORIGINAL" ] && [ "${SKIP_LAYOUT_CHECK:-0}" != "1" ]; then
   echo "checking serialized layout against $(basename "$ORIGINAL")"
   "$HERE/check-layout.sh" "$ORIGINAL" "$DLL"
@@ -60,12 +64,16 @@ if [ -f "$DATA/settings.json" ]; then
 import json, os, shutil, sys
 bundle, data, stamp = sys.argv[1:4]
 def merge(old, new):
+    # The player's file wins; the bundle only contributes keys it does not have yet.
     if isinstance(old, dict) and isinstance(new, dict):
         out = dict(old)
         for k, v in new.items():
-            out[k] = merge(old[k], v) if k in old else v
+            if k not in old:
+                out[k] = v
+            elif isinstance(old[k], type(v)) or (old[k] is None and v is None):
+                out[k] = merge(old[k], v)
         return out
-    return new
+    return old if old is not None else new
 src = {}
 if os.path.exists(bundle):
     src = json.load(open(bundle))

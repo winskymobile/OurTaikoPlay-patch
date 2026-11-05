@@ -37,6 +37,8 @@ RSP="$OUT/runtime.rsp"
 # also use that font, so both the art and the font are embedded in the DLL.
 ART="$OUT/art"
 "$HERE/make-result-art.py" "$SRC" "$ART" >/dev/null
+# 段位道場's 合格条件 labels and tab are painted art too (simplified/traditional copies).
+"$HERE/make-dan-exam-art.py" "$SRC" "$ART" >/dev/null
 FONT="$HERE/../FOT-OedKtrStdE.otf"
 [ -f "$FONT" ] || { echo "FOT-OedKtrStdE.otf is required; put it next to tools/" >&2; exit 1; }
 RESOURCES=(
@@ -52,6 +54,9 @@ RESOURCES=(
   "-resource:$ART/clear_dark.zh_tw.png,OurTaiko.Art.clear_dark.zh_tw.png"
   "-resource:$FONT,OurTaiko.Art.OedKtrStdE.otf"
 )
+for art in "$ART"/exam_*.png "$ART"/confirm_*.png; do
+  [ -f "$art" ] && RESOURCES+=("-resource:$art,OurTaiko.Art.$(basename "$art")")
+done
 echo "font   $FONT"
 
 # A stale DLL from an earlier build must never pass for a successful one.

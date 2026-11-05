@@ -161,9 +161,13 @@ if git diff --quiet "$REF"; then
     fi
   fi
 else
-  git diff "$REF" > "$TMP/tree.patch"
+  # The tree's base is HEAD, not $REF: a fetch may have moved upstream on since the patch was
+  # applied, and diffing against the new tip would undo its commits. Staging is what lets new
+  # files into the diff; nothing is committed.
+  git add -A >/dev/null 2>&1 || true
+  git diff --cached HEAD > "$TMP/tree.patch"
   if cmp -s "$TMP/tree.patch" "$PATCH"; then
-    say "the patch is already applied to $(git rev-parse --short "$REF")"
+    say "the patch is already applied to $(git rev-parse --short HEAD)"
   elif [ "$FROM_TREE" = 1 ]; then
     cp "$TMP/tree.patch" "$PATCH"
     say "adopted the working tree as the patch ($(grep -c '^diff --git' "$PATCH") files)"
@@ -180,17 +184,28 @@ BUILT="$HERE/build/OurTaiko.Runtime.dll"
 
 # -------------------------------------------------------------------- gates
 step "gates"
-"$HERE/check-layout.sh" "$ORIG" "$BUILT" | tail -3
+if ! "$HERE/check-layout.sh" "$ORIG" "$BUILT" > "$TMP/gate.log" 2>&1; then
+  tail -6 "$TMP/gate.log"
+  say ""
+  say "The layout gate failed. If the app was updated since the patch was last rebased, the"
+  say "patch is older than the app: fetch upstream, put the patch on the commit that app was"
+  say "built from, and build again. Nothing was installed."
+  exit 1
+fi
+tail -3 "$TMP/gate.log"
 "$PY" "$HERE/check-translations.py" "$SRC" | tail -2
 
 # ------------------------------------------------------------------ install
 if [ "$DO_INSTALL" = 1 ]; then
   step "install"
+  was_open=0
+  pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1 && was_open=1
   args=("$BUILT" "$APP" "$ROOT/backup")
   [ "$LAUNCH" = 1 ] && args+=(--launch)
   "$HERE/install.sh" "${args[@]}"
-  if pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1; then
-    say "note: the game was still running; the new DLL applies the next time it starts"
+  # Only a game that was already open and could not be closed keeps the old DLL loaded.
+  if [ "$was_open" = 1 ] && pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1; then
+    say "note: the game was already open and would not close; the new DLL applies next launch"
   fi
 else
   say ""

@@ -81,7 +81,7 @@ index d1128ec..35c77be 100644
          static bool Writable(string directory)
          {
 diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
-index d5c3109..b54040e 100644
+index c692525..6f35aed 100644
 --- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
 +++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
 @@ -27,6 +27,8 @@ public static GameSettings FromJson(string json)
@@ -93,7 +93,7 @@ index d5c3109..b54040e 100644
              settings.audio ??= new AudioOptions();
              settings.audio.volume ??= new SoundVolumes();
              settings.audio.backend = settings.audio.Backend;
-@@ -120,6 +122,16 @@ public sealed class DisplaySettings
+@@ -128,6 +130,16 @@ public sealed class DisplaySettings
          public const int MovieLaneOpacityDefault = 40, MovieLaneOpacityStep = 5;
          public int movieLaneOpacity = MovieLaneOpacityDefault;
          public float MovieLaneAlpha => Mathf.Clamp(movieLaneOpacity, 0, 100) / 100f;
@@ -364,10 +364,10 @@ index 0000000..79a53e5
 \ No newline at end of file
 diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
 new file mode 100644
-index 0000000..af411de
+index 0000000..0f61a70
 --- /dev/null
 +++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
-@@ -0,0 +1,648 @@
+@@ -0,0 +1,665 @@
 +using System.Collections.Generic;
 +using TMPro;
 +using UnityEngine;
@@ -430,6 +430,15 @@ index 0000000..af411de
 +                    "播放背景影片时轨道背景的不透明度。100 表示与没有影片时相同。",
 +                    "播放背景影片時軌道背景的不透明度。100 表示與沒有影片時相同。",
 +                    "배경 영상이 재생되는 동안 레인 배경의 불투명도입니다. 100이면 영상이 없을 때와 같습니다."),
++            ["Practice"] = Row("練習", "练习", "練習", "연습"),
++            ["Practice Timing Review"] = Row("練習のタイミング確認", "练习判定时机", "練習判定時機", "연습 타이밍 확인"),
++            ["Show note timing offsets and missed-note marks while browsing a paused or finished practice attempt."] =
++                Row("一時停止中や終了後に練習の譜面を見るとき、音符ごとの早い・遅いと抜けた印を表示します。",
++                    "暂停或结束后浏览练习谱面时，显示每个音符的偏早、偏晚与漏打标记。",
++                    "暫停或結束後瀏覽練習譜面時，顯示每個音符的偏早、偏晚與漏打標記。",
++                    "일시정지하거나 끝난 뒤 연습 채보를 볼 때 음표별 빠름·늦음과 놓친 표시를 보여 줍니다."),
++            ["Switch to Practice"] = Row("練習モードへ", "切换到练习模式", "切換到練習模式", "연습 모드로"),
++            ["Switch to Normal Play"] = Row("通常演奏へ", "切换到普通演奏", "切換到普通演奏", "일반 플레이로"),
 +            ["Flying Notes"] = Row("飛び出す音符", "飞出音符", "飛出音符", "날아가는 음표"),
 +            ["Images draws each flying note as an interface image. Sprites uses the same drawing as the notes on the lane, still one note for every hit."] =
 +                Row("「画像」は界面の画像で飛ばします。「スプライト」は譜面の音符と同じ描き方で、ヒットごとに飛ばします。",
@@ -839,6 +848,14 @@ index 0000000..af411de
 +            ["Close"] = Row("閉じる", "关闭", "關閉", "닫기"),
 +            ["Close Settings"] = Row("設定を閉じる", "关闭设置", "關閉設定", "설정 닫기"),
 +            ["Select"] = Row("決定", "选择", "選擇", "선택"),
++            // The Don key's caption: what a hit does in the settings overlay's current zone.
++            ["Open"] = Row("開く", "打开", "開啟", "열기"),
++            ["Keep"] = Row("確定", "确定", "確定", "확정"),
++            ["Choose"] = Row("選ぶ", "选择", "選擇", "선택"),
++            ["Flip"] = Row("切り替え", "切换", "切換", "전환"),
++            ["Adjust"] = Row("調整", "调整", "調整", "조정"),
++            ["Run"] = Row("実行", "执行", "執行", "실행"),
++            ["Type"] = Row("入力", "输入", "輸入", "입력"),
 +            ["Move"] = Row("移動", "移动", "移動", "이동"),
 +            ["Accounts"] = Row("アカウント", "账号", "帳號", "계정"),
 +            ["Controls"] = Row("操作", "操作", "操作", "조작"),
@@ -1057,10 +1074,10 @@ index dfde334..1f8b7eb 100644
                      {
                          await Client.LoadCatalogAsync(e, cancel);
 diff --git a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
-index ef2037d..4045abb 100644
+index 272f2f2..f835d01 100644
 --- a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
 +++ b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
-@@ -112,6 +112,10 @@ IEnumerator Start()
+@@ -113,6 +113,10 @@ IEnumerator Start()
              resultRestart.onClick.AddListener(Restart);
              resultBack.onClick.AddListener(Back);
              pausePanel.SetActive(false); resultPanel.SetActive(false);
@@ -1071,7 +1088,7 @@ index ef2037d..4045abb 100644
              if (drumPad != null) drumPad.gameObject.SetActive(playSettings.singlePlayerDrumPad);
              hitAudio.PrepareAudioEffects(balloonPop, kusudamaPop, adLibHit, mineHit, danFailed, fusumaClose, fusumaOpen);
              betweenClip = betweenTimeline != null ? LumenClip.Parse(betweenTimeline.text) : LumenClip.Empty;
-@@ -130,7 +134,7 @@ IEnumerator Start()
+@@ -131,7 +135,7 @@ IEnumerator Start()
              {
                  Log.Exception("Play", error);
                  IsFinished = true; resultPanel.SetActive(true);
@@ -1266,12 +1283,20 @@ index aa6870a..551954a 100644
              if (gaugeHitEffect != null) gaugeHitEffect.ShowTime(time);
          }
 diff --git a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
-index 53e73f2..537aa81 100644
+index cd74b7f..dd0c72d 100644
 --- a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
-@@ -26,9 +26,27 @@ public void Show()
-             // remains responsible for mouse/touch clicks, without a second keyboard submit.
-             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+@@ -57,6 +57,7 @@ public void OfferModeSwitch(bool practice)
+         {
+             modeSwitch.GetComponentInChildren<TMP_Text>(true).text = practice ? "Switch to Normal Play" : "Switch to Practice";
+             modeSwitch.interactable = true;
++            UiText.ApplyInGame(modeSwitch.transform);
+         }
+ 
+         public void Show()
+@@ -73,9 +74,38 @@ public void Show()
+             // A button that cannot be chosen keeps its place in the list and shows greyed with its label.
+             foreach (var button in buttons) button.GetComponentInChildren<TMP_Text>(true).alpha = button.interactable ? 1 : .5f;
              Select(0);
 +            ApplyLanguage();
              opening = StartCoroutine(Fade(1));
@@ -1279,18 +1304,29 @@ index 53e73f2..537aa81 100644
  
 +        void ApplyLanguage()
 +        {
-+            string[] captions = { "Resume", "Restart", "Back to Song Select" };
++            // Resume, Restart, the mode switch (its own label from OfferModeSwitch), Back to Song Select.
++            string[] captions = { "Resume", "Restart", null, "Back to Song Select" };
 +            for (int i = 0; i < buttons.Length && i < captions.Length; i++)
 +            {
++                if (captions[i] == null) continue;
 +                var label = buttons[i].GetComponentInChildren<TMPro.TMP_Text>(true);
-+                if (label != null) label.text = UiText.InGame(captions[i]);
++                if (label == null) continue;
++                label.text = UiText.InGame(captions[i]);
++                InGameFont.Use(label);
 +            }
 +            var texts = GetComponentsInChildren<TMPro.TMP_Text>(true);
 +            for (int i = 0; i < texts.Length; i++)
 +            {
-+                if (texts[i].gameObject.name == "Title") texts[i].text = UiText.InGame("PAUSED");
++                if (texts[i].gameObject.name == "Title")
++                {
++                    texts[i].text = UiText.InGame("PAUSED");
++                    InGameFont.Use(texts[i]);
++                }
 +                if (texts[i].gameObject.name == "Hint")
++                {
 +                    texts[i].text = UiText.InGame("↑ / ↓ · Enter   Space / Esc · Resume");
++                    InGameFont.Use(texts[i]);
++                }
 +            }
 +        }
 +
@@ -1298,10 +1334,10 @@ index 53e73f2..537aa81 100644
          {
              if (opening != null) { StopCoroutine(opening); opening = null; }
 diff --git a/Assets/OurTaiko/Runtime/Play/PlayScene.cs b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-index 9670833..3607e44 100644
+index b3ebc75..6dfb6a0 100644
 --- a/Assets/OurTaiko/Runtime/Play/PlayScene.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-@@ -121,6 +121,10 @@ IEnumerator Start()
+@@ -122,6 +122,10 @@ IEnumerator Start()
              resultRestart.onClick.AddListener(Restart);
              resultBack.onClick.AddListener(Back);
              pausePanel.SetActive(false); resultPanel.SetActive(false);
@@ -1312,7 +1348,7 @@ index 9670833..3607e44 100644
              // Disabled and hidden together: an inactive pad neither draws nor registers with InputManager,
              // and pause/resume only re-enables the pads it disabled itself.
              // The touch drum is a single-player setting; two players use the keyboard.
-@@ -149,7 +153,7 @@ IEnumerator Start()
+@@ -152,7 +156,7 @@ IEnumerator Start()
              {
                  Log.Exception("Play", error);
                  IsFinished = true; resultPanel.SetActive(true);
@@ -1320,12 +1356,12 @@ index 9670833..3607e44 100644
 +                resultText.text = UiText.InGame("CHART COULD NOT LOAD") + "\n<size=22>" + error.Message + "</size>";
              }
              if (IsFinished) yield break;
-             while (switcher.IsInputBlocked) yield return null;
+             AddModeSwitch();
 diff --git a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
-index bb60483..74177c3 100644
+index 76d91d1..b5cd3f1 100644
 --- a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
-@@ -285,6 +285,8 @@ void SpawnArc(int index, Judgment result)
+@@ -301,6 +301,8 @@ void SpawnArc(int index, Judgment result)
          {
              if (Views.noteArcs == null) return;
              var note = Session.Chart.Notes[index];
@@ -1689,7 +1725,7 @@ index 77ac177..f5dce12 100644
          }
  
 diff --git a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
-index 06c6415..630a683 100644
+index 9743259..d2c6fe5 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
 @@ -105,7 +105,7 @@ void ShowExpiredAccounts(double now)
@@ -1782,10 +1818,10 @@ index d97cbee..b4412d3 100644
          }
  
 diff --git a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
-index fca5df9..f6fea37 100644
+index 99d4852..96849da 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
-@@ -34,6 +34,7 @@ void Awake()
+@@ -33,6 +33,7 @@ void Awake()
              online = OnlineManager.EnsureInstance();
              card.alpha = 0;
              progress.text = "";
@@ -1793,15 +1829,15 @@ index fca5df9..f6fea37 100644
              touch.Clicked = Skip;
              cancel = new CancellationTokenSource();
          }
-@@ -57,7 +58,7 @@ void Update()
+@@ -56,7 +57,7 @@ void Update()
              card.alpha = fadeSeconds <= 0 ? 1 : Mathf.Clamp01((float)(elapsed / fadeSeconds));
              if (!work.IsCompleted)
              {
 -                progress.text = Skipped ? "Cancelling…" : online.Activity;
 +                progress.text = UiText.InGame(Skipped ? "Cancelling…" : online.Activity);
-                 if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) Skip();
                  return;
              }
+             progress.text = "";
 diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
 index 2db38c2..d648f31 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
@@ -2335,7 +2371,7 @@ index 427d438..aaa022c 100644
          static WheelItem NewSearchItem() => new WheelItem { Kind = ItemKind.Search };
  
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
-index 4876231..028060a 100644
+index bb3feea..391f4ad 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
 @@ -105,9 +105,9 @@ void BindFolder(Board board, FolderSlot slot)
@@ -2364,10 +2400,10 @@ index bd074b8..2631e13 100644
              card.Branch.enabled = details && info.IsBranching;
              for (int k = 0; k < card.Dots.Length; k++) card.Dots[k].enabled = details && k < Math.Min(10, info.Level);
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
-index 2c2e4d9..0d4ec86 100644
+index cc8d099..c773496 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
-@@ -201,6 +201,17 @@ void Awake()
+@@ -202,6 +202,17 @@ void Awake()
              coursePanel.gameObject.SetActive(false);
              DrawOverlays(0);
              if (view.search != null) view.search.Bind(Manager);
@@ -2385,8 +2421,23 @@ index 2c2e4d9..0d4ec86 100644
          }
  
          void Start()
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
+index 9383e91..3b45836 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
+@@ -49,8 +49,9 @@ public sealed class CourseCardView
+         public void ShowPlayMode(bool practice)
+         {
+             if (!practice) return;
+-            ModeLabel = CoinOverlayView.Text(overlays.transform, "PracticeMode", "練習モード");
++            ModeLabel = CoinOverlayView.Text(overlays.transform, "PracticeMode", UiText.InGame("練習モード"));
+             ModeLabel.rectTransform.Center(960, 48);
++            InGameFont.Use(ModeLabel);
+         }
+     }
+ }
 diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
-index 3b3ea50..5f649dd 100644
+index 18556a3..62fd552 100644
 --- a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
 +++ b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
 @@ -16,6 +16,8 @@ public sealed class SettingRow
@@ -2492,7 +2543,7 @@ index 3b3ea50..5f649dd 100644
                          GeneralSettings.LanguageNames,
                          s => Array.IndexOf(GeneralSettings.Languages, s.general.Language),
                          (s, i) => s.general.language = GeneralSettings.Languages[i], list: true)),
-@@ -225,6 +231,15 @@ public static IReadOnlyList<SettingPage> Pages(SoundPlatform platform) => new[]
+@@ -229,6 +235,15 @@ public static IReadOnlyList<SettingPage> Pages(SoundPlatform platform) => new[]
                      SettingRow.Number("lane-opacity", "Lane Opacity", "How opaque the lanes are while a movie plays. 100%: as without a movie.",
                          DisplaySettings.MovieLaneOpacityDefault, DisplaySettings.MovieLaneOpacityStep,
                          s => s.display.movieLaneOpacity, (s, v) => s.display.movieLaneOpacity = v, v => v + "%", 0, 100, slider: true, stepText: DisplaySettings.MovieLaneOpacityStep + "%")),
@@ -2508,7 +2559,7 @@ index 3b3ea50..5f649dd 100644
              }),
              new SettingPage("sound", "Sound", "Volumes and the output device", s => Sound(platform, s.audio.Backend), audioOutput: true),
              new SettingPage("accounts", "Accounts", "OurTaiko accounts for 1P and 2P", _ => new[]
-@@ -256,8 +271,8 @@ static SettingRow[] Timing(GameSettings settings)
+@@ -260,8 +275,8 @@ static SettingRow[] Timing(GameSettings settings)
                  {
                      int w = window;
                      string name = JudgeNames[w];
@@ -2519,7 +2570,7 @@ index 3b3ea50..5f649dd 100644
                          PlaySettings.StandardJudgeMs[w], 1, s => s.play.JudgeMs(w), (s, v) => s.play.SetJudgeMs(w, v),
                          v => v + " ms", PlaySettings.JudgeWindowMinMs, PlaySettings.JudgeWindowMaxMs, stepText: "1 ms"));
                  }
-@@ -282,17 +297,17 @@ static SettingRow[] Account(int seat)
+@@ -286,17 +301,17 @@ static SettingRow[] Account(int seat)
              string player = (seat + 1) + "P";
              return new[]
              {
@@ -2541,7 +2592,7 @@ index 3b3ea50..5f649dd 100644
                  s => Mathf.Clamp(Mathf.RoundToInt(get(s.audio.volume) * 100 / 5f) * 5, 0, 200), (s, v) => set(s.audio.volume, v / 100f),
                  v => v + "%", 0, 200, slider: true, stepText: "5%");
  
-@@ -341,7 +356,7 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
+@@ -345,7 +360,7 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
                  SettingRow.Choice("backend", "Output Backend", "How the game talks to the audio device. ASIO requires a driver.",
                      Array.ConvertAll(backends, b => b.ToString()),
                      s => Array.IndexOf(backends, s.audio.backend), (s, i) => s.audio.backend = backends[i],
@@ -2550,7 +2601,7 @@ index 3b3ea50..5f649dd 100644
              };
              // A backend this platform does not offer (a Windows settings file opened on a Mac) is shown
              // as Automatic by the row above, and AudioEngine falls back the same way; show its rows.
-@@ -350,11 +365,11 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
+@@ -354,11 +369,11 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
                  ? (platform == SoundPlatform.Windows ? AudioBackend.BassWASAPI : AudioBackend.BassSimple) : backend;
              if (selected == AudioBackend.BassSimple)
              {
@@ -2665,13 +2716,15 @@ index 2de3a4b..8a81885 100644
              ShowAccounts();
              Refresh();
 diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsOverlayView.cs b/Assets/OurTaiko/Runtime/Settings/SettingsOverlayView.cs
-index 4ae1a04..3fffacd 100644
+index 4ae1a04..65a394a 100644
 --- a/Assets/OurTaiko/Runtime/Settings/SettingsOverlayView.cs
 +++ b/Assets/OurTaiko/Runtime/Settings/SettingsOverlayView.cs
-@@ -37,6 +37,8 @@ public sealed class SettingsOverlayView : MonoBehaviour
+@@ -36,7 +36,9 @@ public sealed class SettingsOverlayView : MonoBehaviour
+         CanvasGroup group;
          RectTransform panel, rail, viewport, list, sheet, modal, ring, glow;
          Image shade, ringImage, glowImage, sheetShade, modalShade;
-         TextMeshProUGUI breadcrumb, footerText, donHint, modalTitle, modalText, sheetTitle, sheetText;
+-        TextMeshProUGUI breadcrumb, footerText, donHint, modalTitle, modalText, sheetTitle, sheetText;
++        TextMeshProUGUI breadcrumb, footerText, modalTitle, modalText, sheetTitle, sheetText;
 +        // Translated on every Show so a language change reaches the header and the key hints.
 +        TextMeshProUGUI headerTitle, backHint, selectHint, moveHint;
          readonly TextMeshProUGUI[] seatNames = new TextMeshProUGUI[2];
@@ -2713,17 +2766,35 @@ index 4ae1a04..3fffacd 100644
                  Recolor(seatNames[seat], string.IsNullOrEmpty(name) ? Muted : Ink);
              }
          }
-@@ -338,6 +340,10 @@ public void ShowSeats(string p1, string p2)
+@@ -338,6 +340,9 @@ public void ShowSeats(string p1, string p2)
          // banner (null hides it), soundPending marks it as waiting for the overlay to close.
          public void Show(SettingsNavigator nav, string status, string sound, bool soundPending)
          {
 +            if (headerTitle != null) headerTitle.text = UiText.Settings("Settings");
 +            if (backHint != null) backHint.text = UiText.Settings("Back");
-+            if (selectHint != null) selectHint.text = UiText.Settings("Select");
 +            if (moveHint != null) moveHint.text = UiText.Settings("Move");
              ShowRail(nav);
              if (nav.PageIndex != shownPage || Signature(nav) != rowsSignature) BuildRows(nav);
              breadcrumb.text = nav.Page != null ? "›  " + nav.Page.Title : "";
+@@ -355,7 +360,8 @@ public void Show(SettingsNavigator nav, string status, string sound, bool soundP
+             ShowModal(nav);
+ 
+             footerText.text = !string.IsNullOrEmpty(status) ? status : FooterHint(nav);
+-            donHint.text = nav.Zone switch
++            // The Don key's caption says what a hit does in the current zone; translated per Show.
++            selectHint.text = UiText.Settings(nav.Zone switch
+             {
+                 SettingsZone.Rail => nav.OnClose ? "Close" : "Open",
+                 SettingsZone.Adjust => "Keep",
+@@ -368,7 +374,7 @@ public void Show(SettingsNavigator nav, string status, string sound, bool soundP
+                     SettingKind.Text or SettingKind.Password => "Type",
+                     _ => "Choose",
+                 },
+-            };
++            });
+             int focus = nav.Zone == SettingsZone.Rail ? -1 - nav.PageIndex : nav.Zone == SettingsZone.Sheet ? 1000 + nav.SheetIndex : nav.RowIndex;
+             if (focus != lastFocus || nav.Zone != lastZone) following = true;
+             lastFocus = focus; lastZone = nav.Zone;
 @@ -376,8 +382,8 @@ public void Show(SettingsNavigator nav, string status, string sound, bool soundP
  
          static string FooterHint(SettingsNavigator nav)

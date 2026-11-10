@@ -18,7 +18,8 @@ static (Dictionary<string, List<string>> fields, Dictionary<string, string> base
         var name = md.GetString(t.Name);
         if (name.StartsWith("<")) continue;
         var full = string.IsNullOrEmpty(ns) ? name : ns + "." + name;
-        string BaseName(EntityHandle h) => h.Kind switch
+        // <Module> and interfaces have no base type: a nil handle is not a TypeDefinition.
+        string BaseName(EntityHandle h) => h.IsNil ? "" : h.Kind switch
         {
             HandleKind.TypeDefinition => md.GetString(md.GetTypeDefinition((TypeDefinitionHandle)h).Name),
             HandleKind.TypeReference => md.GetString(md.GetTypeReference((TypeReferenceHandle)h).Name),

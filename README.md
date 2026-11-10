@@ -1,7 +1,19 @@
 # OurTaikoPlay 补丁包 · play-preferences
 
-给已安装的 **OurTaikoPlay.app**（1.0-349 ~ 1.0.1-417，Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打上
+给已安装的 **OurTaikoPlay.app**（1.0-349 ~ 1.0.1-467，Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打上
 `play-preferences` 补丁，**不需要 Unity 编辑器**。
+
+**1.0.1-480：** 使用 `play-preferences-1.0.1-480.patch`，基于官方提交
+`1863545c07674dc272c0e48e9378f49e30735bec`。这一版保留新版音频时钟、回放和内置服务器行为，
+补齐歌曲时钟设置的译文，并移除上游已删除的登录场景补丁。
+`play-preferences.patch` 仍是 467 及此前的基线；480 请使用上面的专用补丁。
+
+本机 480 的构建源码保存在 `tools/build/source-1.0.1-480/`，已编译 DLL 在
+`tools/build/1.0.1-480/OurTaiko.Runtime.dll`。重新安装本机构建：
+
+```bash
+tools/install.sh tools/build/1.0.1-480/OurTaiko.Runtime.dll --launch
+```
 
 游戏逻辑全在 `Contents/Resources/Data/Managed/OurTaiko.Runtime.dll` 里。补丁的落地方式：
 用 **app 自带的那套 Unity 程序集**把补丁源码编译成同名 DLL 替换进去。
@@ -25,7 +37,7 @@
 ## 目录
 
 ```
-play-preferences.patch                    完整补丁（基于 upstream/main @ a998c33，兼容 1.0-349 ~ 1.0.1-417）
+play-preferences.patch                    完整补丁（基于 upstream/main @ 4c3961b，兼容 1.0-349 ~ 1.0.1-467）
 FOT-OedKtrStdE.otf                        简繁界面与结算切图字体（大江户勘亭流，补了 6 个繁体 cmap 别名；构建时嵌入 DLL）
 play-preferences-upstream-e8fc18a.patch   上一版存档（基线 e8fc18a）
 README.md                                 本文

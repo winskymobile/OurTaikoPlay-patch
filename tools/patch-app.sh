@@ -2,7 +2,7 @@
 # Take OurTaikoPlay from "the app was updated" to "the selected patch modules are installed".
 #
 #   patch-app.sh [--app <bundle>] [--source <tree>] [--patchset <dir>]
-#                [--preset <name>] [--with <ids>] [--without <ids>]
+#                [--feature <1,2,3>] [--preset <name>] [--with <ids>] [--without <ids>]
 #                [--patch <file>] [--upstream <ref>] [--launch]
 #                [--from-tree] [--no-fetch] [--no-install] [--list] [--yes]
 #
@@ -10,12 +10,16 @@
 # git patch cut against the manifest's base commit, and modules are applied in
 # manifest order. A module may require another module; --with adds dependencies.
 #
-#   --list        show the patch sets, presets and modules, then exit
+#   --list        show the patch sets, feature numbers, presets and modules, then exit
+#   --feature     coarse feature groups: 1 data, 2 interface + game text, 3 flying notes
 #   --preset      core (default), full, data-only, language-only, or a name in the manifest
 #   --with        add modules (comma or space separated)
 #   --without     remove modules after dependencies are resolved
 #   --patch       legacy single-patch mode (the old play-preferences-*.patch flow)
 #   --from-tree   use the source tree as-is (after resolving conflicts by hand)
+#
+# With no selector, an interactive terminal asks for feature numbers (for example
+# 1,3). Pressing Enter picks 1,2. A non-interactive run defaults to core.
 #
 # Nothing is committed: the selected modules stay as a working-tree diff.
 set -euo pipefail
@@ -31,6 +35,7 @@ REF=upstream/main
 PATCHSET=
 PATCH=
 PRESET=
+FEATURE=
 WITH=
 WITHOUT=
 LAUNCH=0
@@ -53,6 +58,7 @@ while [ $# -gt 0 ]; do
     --patchset) PATCHSET=$2; shift 2 ;;
     --patch) PATCH=$2; shift 2 ;;
     --preset) PRESET=$2; shift 2 ;;
+    --feature|--features) FEATURE=$2; shift 2 ;;
     --with) WITH=$2; shift 2 ;;
     --without) WITHOUT=$2; shift 2 ;;
     --upstream) REF=$2; shift 2 ;;
@@ -148,11 +154,21 @@ find_patchset() {
   die "no patch set for $VERSION; available: ${available:-none}. Use --patchset <dir> or --patch <file>."
 }
 
+print_features() {
+  local manifest=$1
+  while IFS='|' read -r kind number name title ids; do
+    [ "$kind" = "feature" ] || continue
+    printf '    %-3s %s  %s\n' "$number" "$title" "$ids"
+  done < "$manifest"
+}
+
 print_patchset() {
   local dir=$1 manifest=$1/manifest.txt
   local base id file req title pname pids
   base=$(awk -F'|' '$1=="base"{print $2; exit}' "$manifest")
   printf 'Patch set %s (base %s)\n' "$(basename "$dir")" "${base:-unknown}"
+  printf '  features:\n'
+  print_features "$manifest"
   printf '  presets:\n'
   while IFS='|' read -r kind pname pids; do
     [ "$kind" = "preset" ] || continue
@@ -186,14 +202,17 @@ find_patchset
 BASE=
 MODULES=$TMP/modules
 PRESETS=$TMP/presets
+FEATURES=$TMP/features
 : > "$MODULES"
 : > "$PRESETS"
+: > "$FEATURES"
 if [ -n "$PATCHSET" ]; then
   MANIFEST=$PATCHSET/manifest.txt
-  while IFS='|' read -r kind a b c d; do
+  while IFS='|' read -r kind a b c d e; do
     case "$kind" in
       ''|'#'*) continue ;;
       base) BASE=$a ;;
+      feature) printf '%s|%s|%s|%s\n' "$a" "$b" "$c" "$d" >> "$FEATURES" ;;
       preset) printf '%s|%s\n' "$a" "$b" >> "$PRESETS" ;;
       module) printf '%s|%s|%s|%s\n' "$a" "$b" "$c" "$d" >> "$MODULES" ;;
     esac
@@ -206,12 +225,34 @@ module_file() { awk -F'|' -v id="$1" '$1==id{print $2; exit}' "$MODULES"; }
 module_reqs() { awk -F'|' -v id="$1" '$1==id{print $3; exit}' "$MODULES"; }
 module_title() { awk -F'|' -v id="$1" '$1==id{print $4; exit}' "$MODULES"; }
 preset_ids() { awk -F'|' -v p="$1" '$1==p{print $2; exit}' "$PRESETS"; }
+feature_ids() { awk -F'|' -v f="$1" '$1==f || $2==f {print $4; exit}' "$FEATURES"; }
 
 expand_ids() {
   local token ids
   for token in $1; do
     ids=$(preset_ids "$token")
     if [ -n "$ids" ]; then expand_ids "$ids"; else printf '%s\n' "$token"; fi
+  done
+}
+
+module_exists() { awk -F'|' -v id="$1" '$1==id{found=1} END{exit !found}' "$MODULES"; }
+
+# Accept feature numbers/names, preset names, and module ids in one list.
+expand_choice() {
+  local token ids
+  for token in $(split_words "$1"); do
+    case "$token" in
+      all)
+        while IFS='|' read -r _ _ _ ids; do expand_ids "$ids"; done < "$FEATURES"
+        continue
+        ;;
+    esac
+    ids=$(feature_ids "$token")
+    if [ -n "$ids" ]; then expand_ids "$ids"; continue; fi
+    ids=$(preset_ids "$token")
+    if [ -n "$ids" ]; then expand_ids "$ids"; continue; fi
+    module_exists "$token" || die "unknown feature, preset or module: $token"
+    printf '%s\n' "$token"
   done
 }
 
@@ -231,25 +272,23 @@ if [ -n "$PATCH" ]; then
 else
   REQUESTED=$TMP/requested
   : > "$REQUESTED"
+  if [ -n "$FEATURE" ]; then
+    expand_choice "$FEATURE" >> "$REQUESTED"
+  fi
   if [ -n "$PRESET" ]; then
-    ids=$(preset_ids "$PRESET")
-    if [ -n "$ids" ]; then expand_ids "$ids" >> "$REQUESTED"; else expand_ids "$PRESET" >> "$REQUESTED"; fi
+    expand_choice "$PRESET" >> "$REQUESTED"
   fi
   if [ -n "$WITH" ]; then
-    for id in $(split_words "$WITH"); do
-      ids=$(preset_ids "$id")
-      if [ -n "$ids" ]; then expand_ids "$ids" >> "$REQUESTED"; else printf '%s\n' "$id" >> "$REQUESTED"; fi
-    done
+    expand_choice "$WITH" >> "$REQUESTED"
   fi
   if [ ! -s "$REQUESTED" ]; then
     if [ "$ASSUME_YES" = 0 ] && [ -t 0 ] && [ -t 1 ]; then
-      printf '\nSelect modules:\n'
-      print_patchset "$PATCHSET" | sed 's/^/  /'
-      printf '\nPreset or module ids (comma separated), or Enter for core: '
+      printf '\nSelect features:\n'
+      print_features "$MANIFEST" | sed 's/^/  /'
+      printf '\nNumbers (comma separated, can pick several), or Enter for 1,2:\n'
       read -r answer
-      [ -z "$answer" ] && answer=core
-      ids=$(preset_ids "$answer")
-      if [ -n "$ids" ]; then expand_ids "$ids" >> "$REQUESTED"; else expand_ids "$answer" >> "$REQUESTED"; fi
+      [ -z "$answer" ] && answer=1,2
+      expand_choice "$answer" >> "$REQUESTED"
     else
       expand_ids "$(preset_ids core)" >> "$REQUESTED"
     fi
@@ -268,7 +307,7 @@ else
 
   # --without, then make sure nothing selected still needs a removed module
   : > "$TMP/removed"
-  for id in $(split_words "$WITHOUT"); do printf '%s\n' "$id" >> "$TMP/removed"; done
+  if [ -n "$WITHOUT" ]; then expand_choice "$WITHOUT" >> "$TMP/removed"; fi
   : > "$TMP/selected"
   for id in $(sort -u "$REQUESTED"); do
     grep -qx "$id" "$TMP/removed" || printf '%s\n' "$id" >> "$TMP/selected"

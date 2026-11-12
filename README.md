@@ -22,8 +22,12 @@
 # 看当前 app 版本可用的模块
 tools/patch-app.sh --list
 
-# 交互选择；直接回车等于 core
+# 交互选择：列出 1 / 2 / 3，输入序号，可多选；回车等于 1,2
 tools/patch-app.sh
+
+# 功能序号：1 数据目录，2 界面与游戏内文字，3 飞出音符
+tools/patch-app.sh --feature 1,2
+tools/patch-app.sh --feature 1,2,3
 
 # 除飞出音符外的全部模块
 tools/patch-app.sh --preset core
@@ -55,9 +59,27 @@ tools/patch-app.sh --preset full --no-install --no-fetch
 
 脚本会按 app 的 `CFBundleShortVersionString` 找 `patches/<版本>/`，在清单的基线提交上
 按顺序应用选中的模块，自动补齐依赖，然后编译、过布局 / 译文两道闸门，最后安装并合并
-`settings.json`。没有显式选择时，终端里会先列出模块并询问；非交互环境默认 `core`。
+`settings.json`。没有显式选择时，终端里先列出 3 个功能序号并等待输入，可输入
+`1,3` 这样的多选；非交互环境默认 `1,2`（相当于 `core`）。
 不传 `--source` 时优先使用 `tools/build/source-<版本>`，避免在 `../OurTaikoPlay`
 的其它分支或未提交改动上误操作。
+
+## 功能序号
+
+| 序号 | 功能 | 展开的模块 |
+| --- | --- | --- |
+| 1 | 数据目录迁移 | `macos-data-root` |
+| 2 | 界面与游戏内文字 | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page` |
+| 3 | 飞出音符 | `flying-notes`（自动补 `interface-language`） |
+
+`--feature` 与 `--preset`、`--with`、`--without` 可以混用；序号、预设名、模块 id
+都会展开成模块列表，例如：
+
+```bash
+tools/patch-app.sh --feature 2,3
+tools/patch-app.sh --feature 1,2 --without result-page
+tools/patch-app.sh --with flying-notes
+```
 
 ## 模块
 

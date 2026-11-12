@@ -78,19 +78,6 @@ index 19f9e62..687dbc4 100644
          }
  
          public Image TouchArea { get; private set; }
-diff --git a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
-index 7e1d470..d803f3e 100644
---- a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
-+++ b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
-@@ -13,7 +13,7 @@ namespace OurTaiko
-     public sealed class LocalSongLibrary : MonoBehaviour
-     {
-         public static LocalSongLibrary Instance { get; private set; }
--        public static string DefaultRoot => Path.Combine(GamePaths.Root, "Songs");
-+        public static string DefaultRoot => GamePaths.SongsDirectory(GamePaths.Root);
- 
-         public IReadOnlyList<string> Roots => roots;
-         // Charts outside box.def folders, by path; then the top-level box.def folders, which hold
 diff --git a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
 index 5e4226a..96849da 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs

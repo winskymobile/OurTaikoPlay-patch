@@ -78,7 +78,6 @@ Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs
 ```
 Assets/OurTaiko/Runtime/Online/OnlineManager.cs
 Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
-Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
 Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
 ```
 
@@ -152,13 +151,34 @@ Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs (+ .meta)
 - `data-only`：只装 `macos-data-root`
 - `language-only`：只装 `interface-language`
 
+## 功能序号
+
+交互运行时直接列出下面三项，输入序号可多选（例如 `1,3`）；直接回车等于 `1,2`。
+
+| 序号 | 功能 | 展开的模块 |
+| --- | --- | --- |
+| 1 | 数据目录迁移 | `macos-data-root` |
+| 2 | 界面与游戏内文字 | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page` |
+| 3 | 飞出音符 | `flying-notes`（自动补 `interface-language`） |
+
+也可以非交互指定：
+
+```bash
+tools/patch-app.sh --feature 1,2
+tools/patch-app.sh --feature 3
+tools/patch-app.sh --feature all
+```
+
 ## 命令
 
 ```bash
 cd /Users/vincent/Documents/开发/OurTaikoPlay-patch
 
-# 列出 507 的模块
+# 列出 507 的功能序号、预设和模块
 tools/patch-app.sh --list
+
+# 按功能序号选择（可多选）
+tools/patch-app.sh --feature 1,2 --no-install
 
 # 只编译检查，不安装
 tools/patch-app.sh --preset full --no-install --no-fetch

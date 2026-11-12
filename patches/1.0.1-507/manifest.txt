@@ -2,6 +2,11 @@
 # base is the upstream commit the module patches are cut against.
 base|a5c3501
 
+# feature|number|name|title|module ids (coarse groups for --feature)
+feature|1|data|数据目录迁移|macos-data-root
+feature|2|text|界面与游戏内文字|interface-language entry-online-text play-text song-select-text result-page dan-page
+feature|3|flying|飞出音符|flying-notes
+
 # preset|name|module ids (space separated; presets may name other presets)
 preset|core|macos-data-root interface-language entry-online-text play-text song-select-text result-page dan-page
 preset|full|core flying-notes

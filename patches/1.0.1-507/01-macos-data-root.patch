@@ -1,0 +1,297 @@
+diff --git a/Assets/OurTaiko/Runtime/Core/GamePaths.cs b/Assets/OurTaiko/Runtime/Core/GamePaths.cs
+index d1128ec..35c77be 100644
+--- a/Assets/OurTaiko/Runtime/Core/GamePaths.cs
++++ b/Assets/OurTaiko/Runtime/Core/GamePaths.cs
+@@ -4,30 +4,68 @@
+ 
+ namespace OurTaiko
+ {
+-    // Where songs, settings, scores and caches live (MajdataPlay MajEnv.RootPath). Desktop players
+-    // keep them with the game: beside the executable on Windows and Linux, inside the .app on
+-    // macOS. iOS uses Documents, which Info.plist shares as On My iPad/iPhone; Android and the
++    // Where songs, settings, scores and caches live (MajdataPlay MajEnv.RootPath). Windows and
++    // Linux keep them beside the executable. macOS standalone uses Application Support, outside
++    // the .app. iOS uses Documents, which Info.plist shares as On My iPad/iPhone; Android and the
+     // Editor use persistentDataPath.
+     public static class GamePaths
+     {
++        public const string MacCompany = "OurTaiko", MacProduct = "OurTaikoPlay";
+         static string root;
+         // First read on the main thread: it asks Unity for the paths.
+         public static string Root => root ??= Resolve();
++        public static string SongsDirectory(string dataRoot) => Path.Combine(dataRoot, "Songs");
+ 
+         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+         static void ResetStatics() => root = null;
+ 
+         static string Resolve()
+         {
+-#if UNITY_STANDALONE && !UNITY_EDITOR
+-            // dataPath is <name>_Data beside the executable, or <name>.app/Contents on macOS.
+-            string beside = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+-            if (Writable(beside)) return beside;
+-            Log.Warn("Paths", "The game folder is read-only; saving to " + Application.persistentDataPath);
++            bool editor = Application.isEditor;
++            bool standalone = !Application.isMobilePlatform && !editor
++                || Application.platform == RuntimePlatform.WindowsPlayer
++                || Application.platform == RuntimePlatform.LinuxPlayer
++                || Application.platform == RuntimePlatform.OSXPlayer;
++#if UNITY_STANDALONE
++            standalone = true;
+ #endif
+-            return Application.persistentDataPath;
++#if UNITY_EDITOR
++            editor = true;
++#endif
++            bool osx = Application.platform == RuntimePlatform.OSXPlayer;
++            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
++            string chosen = ChooseRoot(editor, standalone, osx, Application.dataPath, Application.persistentDataPath, home, Writable);
++            if (!editor && standalone && !osx)
++            {
++                string beside = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
++                if (!Writable(beside))
++                    Log.Warn("Paths", "The game folder is read-only; saving to " + Application.persistentDataPath);
++            }
++            if (!editor && osx)
++            {
++                string legacy = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
++                MacPlayerData.CopyMissing(legacy, chosen);
++            }
++            return chosen;
+         }
+ 
++        // editor: Unity Editor. standalone: Windows, Linux, or macOS player. osx: macOS player only.
++        internal static string ChooseRoot(bool editor, bool standalone, bool osx, string dataPath, string persistentPath,
++            string home, Func<string, bool> writable)
++        {
++            if (!editor && standalone && osx) return MacStandaloneRoot(home);
++            if (!editor && standalone)
++            {
++                string beside = Path.GetFullPath(Path.Combine(dataPath, ".."));
++                if (writable(beside)) return beside;
++                return persistentPath;
++            }
++            return persistentPath;
++        }
++
++        internal static string MacStandaloneRoot(string home) => Path.GetFullPath(Path.Combine(
++            home, "Library", "Application Support", MacCompany, MacProduct));
++
+         // A translocated macOS app or an install under Program Files cannot be written.
+         static bool Writable(string directory)
+         {
+diff --git a/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs
+new file mode 100644
+index 0000000..09b54d9
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs
+@@ -0,0 +1,55 @@
++using System;
++using System.IO;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // Copies player files out of a macOS .app bundle root. The bundle root also holds Contents
++    // and the executable, so only the named entries move, and nothing is deleted.
++    public static class MacPlayerData
++    {
++        public static readonly string[] Files = {
++            "settings.json", "options.json", "player.json", "servers.json", "scores.sqlite3",
++        };
++        public static readonly string[] Folders = { "Songs", "cache" };
++
++        public static void CopyMissing(string sourceRoot, string destinationRoot)
++        {
++            try
++            {
++                if (string.IsNullOrEmpty(sourceRoot) || string.IsNullOrEmpty(destinationRoot)) return;
++                sourceRoot = Path.GetFullPath(sourceRoot);
++                destinationRoot = Path.GetFullPath(destinationRoot);
++                if (string.Equals(sourceRoot, destinationRoot, StringComparison.Ordinal)) return;
++                Directory.CreateDirectory(destinationRoot);
++                foreach (string folder in Folders) CopyFolder(Path.Combine(sourceRoot, folder), Path.Combine(destinationRoot, folder));
++                foreach (string file in Files) CopyFile(Path.Combine(sourceRoot, file), Path.Combine(destinationRoot, file));
++            }
++            catch (Exception error) { Debug.LogWarning("Could not copy player data: " + error.Message); }
++        }
++
++        static void CopyFile(string source, string destination)
++        {
++            if (!File.Exists(source)) return;
++            if (File.Exists(destination) && new FileInfo(destination).Length > 0) return;
++            Directory.CreateDirectory(Path.GetDirectoryName(destination));
++            File.Copy(source, destination, true);
++        }
++
++        // An empty Songs directory still counts as missing, so a later launch can fill it.
++        static void CopyFolder(string source, string destination)
++        {
++            if (!Directory.Exists(source)) return;
++            if (Directory.Exists(destination) && Directory.GetFileSystemEntries(destination).Length > 0) return;
++            Directory.CreateDirectory(destination);
++            foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
++            {
++                string relative = Path.GetRelativePath(source, file);
++                string target = Path.Combine(destination, relative);
++                Directory.CreateDirectory(Path.GetDirectoryName(target));
++                if (File.Exists(target) && new FileInfo(target).Length > 0) continue;
++                File.Copy(file, target, true);
++            }
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta
+new file mode 100644
+index 0000000..79a53e5
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Core/MacPlayerData.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 1193abf3f0f84c3188de6e6e679e3496
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs
+new file mode 100644
+index 0000000..d9cbd1a
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs
+@@ -0,0 +1,37 @@
++using System.IO;
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class GamePathsTests
++    {
++        const string Data = "/Game/OurTaikoPlay.app/Contents";
++        const string Persistent = "/Users/player/Library/Application Support/Other";
++        const string Home = "/Users/player";
++
++        [Test]
++        public void MacStandaloneUsesApplicationSupportAndKeepsSongsUnderIt()
++        {
++            string root = GamePaths.ChooseRoot(false, true, true, Data, Persistent, Home, _ => true);
++            Assert.That(root, Is.EqualTo(Path.GetFullPath(Path.Combine(
++                Home, "Library", "Application Support", "OurTaiko", "OurTaikoPlay"))));
++            Assert.That(GamePaths.SongsDirectory(root), Is.EqualTo(Path.Combine(root, "Songs")));
++            Assert.That(GamePaths.ChooseRoot(false, true, true, Data, Persistent, Home, _ => false), Is.EqualTo(root));
++        }
++
++        [Test]
++        public void WindowsAndLinuxStayBesideTheExecutableWhenItIsWritable()
++        {
++            string beside = Path.GetFullPath(Path.Combine(Data, ".."));
++            Assert.That(GamePaths.ChooseRoot(false, true, false, Data, Persistent, Home, _ => true), Is.EqualTo(beside));
++            Assert.That(GamePaths.ChooseRoot(false, true, false, Data, Persistent, Home, _ => false), Is.EqualTo(Persistent));
++        }
++
++        [Test]
++        public void EditorAndMobileKeepThePersistentPath()
++        {
++            Assert.That(GamePaths.ChooseRoot(true, true, true, Data, Persistent, Home, _ => true), Is.EqualTo(Persistent));
++            Assert.That(GamePaths.ChooseRoot(false, false, false, Data, Persistent, Home, _ => true), Is.EqualTo(Persistent));
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta
+new file mode 100644
+index 0000000..4e88931
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 87de5235d17c44ce95583b78a025a179
+\ No newline at end of file
+diff --git a/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs
+new file mode 100644
+index 0000000..c276980
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs
+@@ -0,0 +1,78 @@
++using System.IO;
++using System.Linq;
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class MacPlayerDataTests
++    {
++        string source, destination;
++
++        [SetUp]
++        public void SetUp()
++        {
++            string id = System.Guid.NewGuid().ToString("N");
++            source = Path.Combine(UnityEngine.Application.temporaryCachePath, "mac-src-" + id);
++            destination = Path.Combine(UnityEngine.Application.temporaryCachePath, "mac-dst-" + id);
++            Directory.CreateDirectory(Path.Combine(source, "Contents", "MacOS"));
++            File.WriteAllText(Path.Combine(source, "Contents", "Info.plist"), "bundle");
++            File.WriteAllBytes(Path.Combine(source, "Contents", "MacOS", "OurTaikoPlay"), new byte[] { 1, 2, 3 });
++        }
++
++        [TearDown]
++        public void TearDown()
++        {
++            if (Directory.Exists(source)) Directory.Delete(source, true);
++            if (Directory.Exists(destination)) Directory.Delete(destination, true);
++        }
++
++        [Test]
++        public void CopiesSongsIntoAnEmptyDestinationAndLeavesTheAppBundle()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs", "Pack"));
++            File.WriteAllText(Path.Combine(source, "Songs", "Pack", "song.tja"), "TITLE:One");
++            File.WriteAllText(Path.Combine(source, "settings.json"), "{\"general\":{}}");
++            Directory.CreateDirectory(destination);
++            MacPlayerData.CopyMissing(source, destination);
++
++            Assert.That(File.ReadAllText(Path.Combine(destination, "Songs", "Pack", "song.tja")), Is.EqualTo("TITLE:One"));
++            Assert.That(File.ReadAllText(Path.Combine(destination, "settings.json")), Is.EqualTo("{\"general\":{}}"));
++            Assert.That(File.ReadAllText(Path.Combine(source, "Songs", "Pack", "song.tja")), Is.EqualTo("TITLE:One"));
++            Assert.That(Directory.Exists(Path.Combine(destination, "Contents")), Is.False);
++            Assert.That(File.Exists(Path.Combine(destination, "OurTaikoPlay")), Is.False);
++        }
++
++        [Test]
++        public void FillsAnEmptySongsDirectory()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "chart");
++            Directory.CreateDirectory(Path.Combine(destination, "Songs"));
++            MacPlayerData.CopyMissing(source, destination);
++            Assert.That(File.ReadAllText(Path.Combine(destination, "Songs", "a.tja")), Is.EqualTo("chart"));
++        }
++
++        [Test]
++        public void DoesNotOverwriteANonEmptyDestination()
++        {
++            File.WriteAllText(Path.Combine(source, "settings.json"), "old");
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "old chart");
++            Directory.CreateDirectory(Path.Combine(destination, "Songs"));
++            File.WriteAllText(Path.Combine(destination, "Songs", "kept.tja"), "kept");
++            File.WriteAllText(Path.Combine(destination, "settings.json"), "kept settings");
++            MacPlayerData.CopyMissing(source, destination);
++            Assert.That(File.ReadAllText(Path.Combine(destination, "settings.json")), Is.EqualTo("kept settings"));
++            Assert.That(Directory.GetFiles(Path.Combine(destination, "Songs")).Select(Path.GetFileName), Is.EqualTo(new[] { "kept.tja" }));
++        }
++
++        [Test]
++        public void ACopyFailureDoesNotThrow()
++        {
++            Directory.CreateDirectory(Path.Combine(source, "Songs"));
++            File.WriteAllText(Path.Combine(source, "Songs", "a.tja"), "chart");
++            Assert.DoesNotThrow(() => MacPlayerData.CopyMissing(source, Path.Combine(destination, "\0bad")));
++            Assert.That(File.Exists(Path.Combine(source, "Songs", "a.tja")), Is.True);
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta
+new file mode 100644
+index 0000000..4980a18
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 636401230eed4c7ea1fa65097f3acdfe
+\ No newline at end of file

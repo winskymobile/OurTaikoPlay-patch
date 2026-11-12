@@ -1,0 +1,19 @@
+# OurTaikoPlay 1.0.1-507 patch set
+# base is the upstream commit the module patches are cut against.
+base|a5c3501
+
+# preset|name|module ids (space separated; presets may name other presets)
+preset|core|macos-data-root interface-language entry-online-text play-text song-select-text result-page dan-page
+preset|full|core flying-notes
+preset|data-only|macos-data-root
+preset|language-only|interface-language
+
+# module|id|patch file|requires (space separated)|title
+module|macos-data-root|01-macos-data-root.patch||macOS 数据目录（Application Support + 首次迁移）
+module|interface-language|02-interface-language.patch||界面译文核心（日 / 简 / 繁，含游戏内字体）
+module|entry-online-text|03-entry-online-text.patch|interface-language|入口、在线账号与提示文字
+module|play-text|04-play-text.patch|interface-language|演奏、暂停、练习与加载文字
+module|song-select-text|05-song-select-text.patch|interface-language|选曲界面文字
+module|result-page|06-result-page.patch|interface-language|结算页文字与简繁切图
+module|dan-page|07-dan-page.patch|interface-language|段位道场文字与简繁切图
+module|flying-notes|08-flying-notes.patch|interface-language|飞出音符（绘制方式 / 数量，可选）

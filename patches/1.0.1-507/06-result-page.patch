@@ -1,0 +1,351 @@
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
+index f075e71..d648f31 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
+@@ -29,20 +29,23 @@ public void Bind(PlayResult result)
+         {
+             boundResult = result;
+             calibrationError = null;
++            // The score and timing pages are siblings of the navigation strip, so the scene's own
++            // translation pass does not reach them. Translate their authored captions (成绩,
++            // 判定详情, the axis and metric names) before the values below are written.
++            if (scorePage != null) UiText.ApplyInGame(scorePage.transform);
++            if (detailPage != null) UiText.ApplyInGame(detailPage.transform);
+             var data = result.AutoPlay ? null : result.Timing;
+             histogram.Show(data);
+             string Number(double? value) => value.HasValue ? value.Value.ToString("0.0", CultureInfo.InvariantCulture) + " ms" : "—";
+             mean.text = data?.MeanMs is double m ? m.ToString("+0.0;-0.0;0.0", CultureInfo.InvariantCulture) + " ms" : "—";
+             deviation.text = Number(data?.StandardDeviationMs);
+             absolute.text = Number(data?.MeanAbsoluteMs);
+-            counts.text = L10n.Format("Result", "analysis.counts", data?.Count ?? 0, data?.Misses ?? 0)
+-                + (result.CustomJudge ? "    " + L10n.Get("Result", "analysis.customJudge") : "");
+-            sides.text = L10n.Format("Result", "analysis.sides", data?.Early ?? 0, data?.Late ?? 0)
+-                + (data?.Exact > 0 ? "    " + L10n.Format("Result", "analysis.exact", data.Exact) : "");
+-            empty.text = result.AutoPlay ? L10n.Get("Result", "analysis.autoPlay") : data == null || data.Count == 0 ? L10n.Get("Result", "analysis.noHits") : "";
++            counts.text = $"{T("有效击打")} {data?.Count ?? 0}    {T("漏打")} {data?.Misses ?? 0}"
++                + (result.CustomJudge ? "    " + T("自定义判定 不计成绩") : "");
++            sides.text = $"{T("早")} {data?.Early ?? 0}    {T("晚")} {data?.Late ?? 0}" + (data?.Exact > 0 ? $"    {T("零偏差")} {data.Exact}" : "");
++            empty.text = result.AutoPlay ? T("自动演奏不统计手动偏差") : data == null || data.Count == 0 ? T("暂无有效击打") : "";
+             meanLegend.text = data?.MeanMs is double average
+-                ? L10n.Get("Result", "analysis.meanLegend") + " · " + L10n.Get("Result", average < 0 ? "analysis.leanEarly" : average > 0 ? "analysis.leanLate" : "analysis.centered")
+-                : L10n.Get("Result", "analysis.meanLegend");
++                ? T("虚线：平均偏差") + " · " + (average < 0 ? T("偏早") : average > 0 ? T("偏晚") : T("居中")) : T("虚线：平均偏差");
+             for (int i = 0; i < yLabels.Length; i++) yLabels[i].text = (histogram.AxisMaximum * i / 4).ToString();
+             Details = false; changedAt = double.NegativeInfinity;
+             DrawPages();
+@@ -60,7 +63,7 @@ public bool ApplyOffset(bool audio)
+             }
+             catch (Exception error)
+             {
+-                calibrationError = L10n.Get("Result", "calibration.saveFailed");
++                calibrationError = T("保存失败，请重试");
+                 Log.Warn("Result", "Could not save timing adjustment: " + error.Message);
+                 DrawCalibration();
+                 return false;
+@@ -75,19 +78,19 @@ void DrawCalibration()
+             bool canAudio = calibration?.CanApply(current, true) == true;
+             bool canJudge = calibration?.CanApply(current, false) == true;
+             string Recommendation(int value, int? target) => target.HasValue ? Milliseconds(value) + " → " + Milliseconds(target.Value) : "—";
+-            audioRecommendation.text = calibration == null ? "—" : calibration.AudioApplied ? L10n.Format("Result", "calibration.adjusted", Milliseconds(calibration.RecommendedAudioMs.Value)) : Recommendation(calibration.AudioOffsetMs, calibration.RecommendedAudioMs);
+-            judgeRecommendation.text = calibration == null ? "—" : calibration.JudgeApplied ? L10n.Format("Result", "calibration.adjusted", Milliseconds(calibration.RecommendedJudgeMs.Value)) : Recommendation(calibration.JudgeOffsetMs, calibration.RecommendedJudgeMs);
++            audioRecommendation.text = calibration == null ? "—" : calibration.AudioApplied ? T("已调整") + " · " + Milliseconds(calibration.RecommendedAudioMs.Value) : Recommendation(calibration.AudioOffsetMs, calibration.RecommendedAudioMs);
++            judgeRecommendation.text = calibration == null ? "—" : calibration.JudgeApplied ? T("已调整") + " · " + Milliseconds(calibration.RecommendedJudgeMs.Value) : Recommendation(calibration.JudgeOffsetMs, calibration.RecommendedJudgeMs);
+             adjustAudio.GetComponent<CanvasGroup>().alpha = canAudio ? 1 : .45f;
+             adjustJudge.GetComponent<CanvasGroup>().alpha = canJudge ? 1 : .45f;
+             if (calibrationError != null) calibrationStatus.text = calibrationError;
+-            else if (boundResult?.AutoPlay == true) calibrationStatus.text = L10n.Get("Result", "calibration.autoPlay");
+-            else if (boundResult?.Timing == null || boundResult.Timing.Count == 0) calibrationStatus.text = L10n.Get("Result", "calibration.noHits");
+-            else if (calibration == null) calibrationStatus.text = L10n.Get("Result", "calibration.notRecorded");
+-            else if (!calibration.Matches(current)) calibrationStatus.text = L10n.Get("Result", "calibration.changed");
++            else if (boundResult?.AutoPlay == true) calibrationStatus.text = T("自动演奏不提供偏移建议");
++            else if (boundResult?.Timing == null || boundResult.Timing.Count == 0) calibrationStatus.text = T("暂无有效击打，无法推荐");
++            else if (calibration == null) calibrationStatus.text = T("本局未记录偏移设置，无法推荐");
++            else if (!calibration.Matches(current)) calibrationStatus.text = T("偏移设置已变化，请重新游玩");
+             else if (calibration.AudioApplied || calibration.JudgeApplied)
+-                calibrationStatus.text = L10n.Format("Result", "calibration.saved", calibration.AudioApplied && calibration.JudgeApplied ? "A / B" : calibration.AudioApplied ? "A" : "B");
+-            else if (calibration.CorrectionMs == 0) calibrationStatus.text = L10n.Get("Result", "calibration.belowOne");
+-            else calibrationStatus.text = L10n.Get("Result", "calibration.hint");
++                calibrationStatus.text = T("已保存") + " " + (calibration.AudioApplied && calibration.JudgeApplied ? "A / B" : calibration.AudioApplied ? "A" : "B") + "，" + T("下次游玩生效");
++            else if (calibration.CorrectionMs == 0) calibrationStatus.text = T("平均偏差不足 1 ms，无需调整");
++            else calibrationStatus.text = T("每次修正平均偏差的 ½ · 每项限本局一次");
+         }
+         public void SetPage(bool details, int moveDirection)
+         {
+@@ -95,7 +98,8 @@ public void SetPage(bool details, int moveDirection)
+             Details = details; direction = moveDirection < 0 ? -1 : 1; changedAt = GameTimeline.FrameTime;
+             DrawPages();
+         }
+-        public void SetReady(bool complete) => actionLabel.text = L10n.Get("Result", complete ? "page.backToSelect" : "page.skip");
++        public void SetReady(bool complete) => actionLabel.text = complete ? T("返回选曲") : T("跳过演出");
++        static string T(string source) => UiText.InGame(source);
+         void Update() => DrawPages();
+         void DrawPages()
+         {
+@@ -117,7 +121,7 @@ void Page(CanvasGroup group, bool entering)
+                 ((RectTransform)offsetControls.transform).anchoredPosition = ((RectTransform)detailPage.transform).anchoredPosition;
+                 DrawCalibration();
+             }
+-            pageName.text = L10n.Get("Result", Details ? "page.details" : "page.score");
++            pageName.text = Details ? T("判定详情") : T("成绩");
+             for (int i = 0; i < dots.Length; i++) dots[i].color = i == (Details ? 1 : 0)
+                 ? new Color32(238, 82, 39, 255) : new Color32(180, 172, 152, 255);
+         }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs
+new file mode 100644
+index 0000000..1e63e27
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs
+@@ -0,0 +1,89 @@
++using System.Collections.Generic;
++using System.IO;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // The result board's difficulty tabs and judge labels are painted into two sprites, so the
++    // translation table cannot reach them. The patch build embeds Simplified and Traditional copies
++    // of those sprites (tools/make-result-art.py); Japanese, and English which shows Japanese
++    // in game, keep the sprites shipped with the app.
++    static class ResultArt
++    {
++        const string Prefix = "OurTaiko.Art.";
++        static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
++        static readonly Dictionary<string, Texture2D> Textures = new Dictionary<string, Texture2D>();
++        static bool missing;
++
++        public static Sprite Difficulty(int index)
++        {
++            var texture = Sheet("difficulty");
++            if (texture == null) return null;
++            index = Mathf.Clamp(index, 0, 4);
++            string key = "difficulty:" + UiText.InGameLanguage(UiText.Language) + ":" + index;
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var rect = new Rect(index * 320, 0, 320, 96);
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "ResultDifficulty" + index;
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        public static Sprite Score() => Whole("score", new Rect(0, 0, 420, 48));
++
++        // clear_ja.png is a 120x40 sheet whose クリア sprite sits at (0, 4) and is 64x31.
++        public static Sprite Clear(bool dark) =>
++            Whole(dark ? "clear_dark" : "clear", new Rect(0, 4, 64, 31));
++
++        static Sprite Whole(string name, Rect rect)
++        {
++            var texture = Sheet(name);
++            if (texture == null) return null;
++            string key = name + ":" + UiText.InGameLanguage(UiText.Language);
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "Result" + name;
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        public static Sprite JudgeLabels()
++        {
++            var texture = Sheet("judge");
++            if (texture == null) return null;
++            string key = "judge:" + UiText.InGameLanguage(UiText.Language);
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            var rect = new Rect(0, 0, texture.width, texture.height);
++            var sprite = Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = "ResultJudgeLabels";
++            Cache[key] = sprite;
++            return sprite;
++        }
++
++        static Texture2D Sheet(string name)
++        {
++            string language = UiText.InGameLanguage(UiText.Language);
++            if (language != "zh" && language != "zh_tw") return null;
++            if (missing) return null;
++            string key = name + ":" + language;
++            if (Textures.TryGetValue(key, out var cached)) return cached;
++            var texture = Read(name + "." + language);
++            if (texture == null) { missing = true; return null; }
++            Textures[key] = texture;
++            return texture;
++        }
++
++        static Texture2D Read(string file)
++        {
++            using var stream = typeof(ResultArt).Assembly.GetManifestResourceStream(Prefix + file + ".png");
++            if (stream == null) return null;
++            using var memory = new MemoryStream();
++            stream.CopyTo(memory);
++            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
++            if (!texture.LoadImage(memory.ToArray())) return null;
++            texture.wrapMode = TextureWrapMode.Clamp;
++            texture.filterMode = FilterMode.Bilinear;
++            return texture;
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta
+new file mode 100644
+index 0000000..1a67e11
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultArt.cs.meta
+@@ -0,0 +1,11 @@
++fileFormatVersion: 2
++guid: 5f6b2c1d9a4e47b08c3d2e1f0a9b8c7d
++MonoImporter:
++  externalObjects: {}
++  serializedVersion: 2
++  defaultReferences: []
++  executionOrder: 0
++  icon: {instanceID: 0}
++  userData:
++  assetBundleName:
++  assetBundleVariant:
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs b/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
+index 70a2224..725b04e 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
+@@ -146,7 +146,9 @@ void DrawGauge(double now)
+             DrawRainbow(full, now);
+ 
+             bool lit = shown >= clearCell - 1 && cleared;
+-            captionImage.sprite = lit ? scene.clearCaption : scene.clearCaptionDark;
++            captionImage.sprite = lit
++                ? ResultArt.Clear(false) ?? scene.clearCaption
++                : ResultArt.Clear(true) ?? scene.clearCaptionDark;
+             soulImage.sprite = lit ? scene.soul : scene.soulDark;
+             // tamashii_gage fever: flame cel, fade-in and sheen sampled from anim/fever_fire.
+             fireImage.enabled = sheenImage.enabled = false;
+@@ -273,15 +275,34 @@ void Bind()
+             var view = View;
+             successImage = twoPlayers && view.successTwoPlayers != null ? view.successTwoPlayers : view.success;
+             if (view.successTwoPlayers != null) (successImage == view.success ? view.successTwoPlayers : view.success).Alpha(0);
+-            view.difficulty.sprite = scene.difficulties[Math.Min(Math.Max((int)Result.Difficulty, 0), scene.difficulties.Length - 1)];
++            int difficultyIndex = Math.Min(Math.Max((int)Result.Difficulty, 0), scene.difficulties.Length - 1);
++            view.difficulty.sprite = ResultArt.Difficulty(difficultyIndex) ?? scene.difficulties[difficultyIndex];
+             judgeImages = new Image[view.judgeRows.Length][];
+             for (int row = 0; row < judgeImages.Length; row++) judgeImages[row] = view.judgeRows[row].digits;
++            // The judge labels are painted into one sprite; swap in the localized sheet.
++            var judgeLabels = view.difficulty != null && view.difficulty.transform.parent != null
++                ? view.difficulty.transform.parent.Find("JudgeLabels") : null;
++            var judgeArt = ResultArt.JudgeLabels();
++            if (judgeArt != null && judgeLabels != null && judgeLabels.TryGetComponent<Image>(out var judgeImage))
++                judgeImage.sprite = judgeArt;
++            var scoreLabel = view.difficulty != null && view.difficulty.transform.parent != null
++                ? view.difficulty.transform.parent.Find("ScoreLabel") : null;
++            var scoreArt = ResultArt.Score();
++            if (scoreArt != null && scoreLabel != null && scoreLabel.TryGetComponent<Image>(out var scoreImage))
++                scoreImage.sprite = scoreArt;
+             scoreOutline = view.scoreOutline;
+             scoreFill = view.scoreFill;
+ 
+             highScoreGroup = view.highScore;
+             highScoreAlpha = view.highScoreGroup;
+             highScoreBase = highScoreGroup.anchoredPosition;
++            // The caption above the difference is authored in Japanese.
++            var highScoreCaption = highScoreGroup.Find("Caption");
++            if (highScoreCaption != null && highScoreCaption.TryGetComponent<TMP_Text>(out var captionText))
++            {
++                captionText.text = UiText.InGame(captionText.text);
++                InGameFont.Use(captionText);
++            }
+             highScoreNumber = view.highScoreDigits;
+             string difference = Result.ScoreDifference.ToString();
+             for (int i = 0; i < highScoreNumber.Length; i++)
+@@ -299,6 +320,7 @@ void Bind()
+             messageImage.sprite = messages[(int)Result.Message];
+             messageText = view.messageText;
+             messageText.text = ResultScene.MessageText(Result.Message);
++            InGameFont.Use(messageText);
+ 
+             unfilledImage = view.unfilled;
+             var unfilled = Seat == 1 && scene.unfilled2P != null && scene.unfilled2P.Length > 0 ? scene.unfilled2P : scene.unfilled;
+@@ -321,5 +343,6 @@ void Bind()
+             soulImage = view.soul;
+             sheenImage = view.soulSheen;
+         }
++
+     }
+ }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs b/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
+index 83b657c..93c372c 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
+@@ -378,7 +378,16 @@ void Bind()
+             fadeIn = new ResultBackground(view.fadeIn, bgClip, Clip(fujiTimeline));
+             view.songTitle.text = Result.Title;
+             view.songTitle.Squeeze(view.songTitle.rectTransform.sizeDelta.x);
+-            view.songNumber.text = L10n.Format("Result", "result.songNumber", Math.Max(1, switcher.SongsPlayed));
++            view.songNumber.text = UiText.InGameFormat("{0}曲目", Math.Max(1, switcher.SongsPlayed));
++            InGameFont.Use(view.songNumber);
++            // The analysis pages' captions, axes and adjustment titles are authored in Chinese.
++            if (view.analysis != null) UiText.ApplyInGame(view.analysis.transform);
++            if (view.secondAnalysis != null) UiText.ApplyInGame(view.secondAnalysis.transform);
++            if (view.freePlay != null)
++            {
++                view.freePlay.text = UiText.InGame(view.freePlay.text);
++                InGameFont.Use(view.freePlay);
++            }
+ 
+             // ResultScreen::draw_overlay: coin_overlay's credit line (result shows no chip or invite), over the wipe.
+             if (overlay != null) Coins = new CoinOverlayView(overlay, view.freePlay, null, null, null, null);
+diff --git a/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs
+new file mode 100644
+index 0000000..1822fb9
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs
+@@ -0,0 +1,44 @@
++using System.Collections;
++using NUnit.Framework;
++using UnityEngine;
++using UnityEngine.TestTools;
++
++namespace OurTaiko.Tests
++{
++    public sealed class ResultLanguageFlowTests
++    {
++        [UnityTest]
++        public IEnumerator TraditionalChineseReplacesTheHardcodedResultLabel()
++        {
++            var manager = SettingManager.EnsureInstance();
++            var previous = manager.Settings.Clone();
++            GameObject host = null;
++            try
++            {
++                var settings = previous.Clone();
++                settings.general.language = "zh_tw";
++                manager.UseUnsaved(settings);
++                host = new GameObject("ResultLanguage", typeof(Canvas));
++                var labelObject = new GameObject("Action", typeof(RectTransform));
++                labelObject.transform.SetParent(host.transform, false);
++                var label = labelObject.AddComponent<TMPro.TextMeshProUGUI>();
++                var view = host.AddComponent<ResultAnalysisView>();
++                view.actionLabel = label;
++                view.SetReady(true);
++                Assert.That(label.text, Is.EqualTo("返回選曲"));
++                settings.general.language = "en";
++                manager.UseUnsaved(settings);
++                view.SetReady(true);
++                Assert.That(label.text, Is.EqualTo("曲選択にもどる"));
++                Assert.That(SongInfo.Read("TITLE:English title\nTITLEJA:日本語\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1000,\n#END", "en").Title,
++                    Is.EqualTo("English title"));
++                yield return null;
++            }
++            finally
++            {
++                manager.UseUnsaved(previous);
++                if (host != null) Object.Destroy(host);
++            }
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta
+new file mode 100644
+index 0000000..d9223d6
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 0ab29eab53be4abe9b4b82b707b65dfe
+\ No newline at end of file

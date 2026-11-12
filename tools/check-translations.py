@@ -2,7 +2,7 @@
 """Check the UiText table before shipping a patched DLL.
 
 Every Settings()/SettingsFormat()/InGame() key used by the settings screens must
-have a table row, and every row must carry ja/zh/zh_tw/ko. Run from anywhere:
+have a table row, and every row must carry ja/zh/zh_tw. Run from anywhere:
 
     tools/check-translations.py [source-tree]
 """
@@ -25,7 +25,7 @@ for key, args in rows:
 
 problems = []
 for key, columns in table.items():
-    if len(columns) != 4 or any(not c.strip() for c in columns):
+    if len(columns) != 3 or any(not c.strip() for c in columns):
         problems.append(f"row has {len(columns)} columns: {key}")
 
 used = set()
@@ -39,11 +39,16 @@ for key in sorted(used):
     if key not in table:
         problems.append(f"no translation for: {key!r}")
 
+# Some modules only ship part of the UI. A table key with no consumer is not an
+# error then, so these stay as notes.
+notes = []
 for key in sorted(table):
     if len(re.findall(r"\{\d\}", key)) and key not in used:
-        problems.append(f"placeholder key never used: {key!r}")
+        notes.append(f"placeholder key has no consumer: {key!r}")
 
 print(f"{len(table)} rows, {len(used)} keys used by the runtime")
+for note in notes:
+    print("  note: " + note)
 if problems:
     print("\n".join("  " + p for p in problems))
     sys.exit(1)

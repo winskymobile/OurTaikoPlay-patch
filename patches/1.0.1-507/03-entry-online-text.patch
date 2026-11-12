@@ -1,0 +1,114 @@
+diff --git a/Assets/OurTaiko/Runtime/Online/OnlineManager.cs b/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
+index 945d3ed..c896907 100644
+--- a/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
++++ b/Assets/OurTaiko/Runtime/Online/OnlineManager.cs
+@@ -220,8 +220,8 @@ public async Task<bool> LoginAsync(CancellationToken cancel = default, bool refr
+                         if (seat == 0) results.Add(Item(who, L10n.Get("Online", "summary.guest")));
+                         continue;
+                     }
+-                    if (cancel.IsCancellationRequested) { results.Add(Item(who, L10n.Get("Online", "summary.cancelled"))); continue; }
+-                    Activity = L10n.Format("Online", "activity.checkingAccount", who);
++                    if (cancel.IsCancellationRequested) { results.Add(who + ": cancelled"); continue; }
++                    Activity = UiText.InGameFormat("Checking {0}'s OurTaiko account…", who);
+                     try
+                     {
+                         await Center.RefreshAsync(account, cancel);
+@@ -250,7 +250,7 @@ public async Task<bool> LoginAsync(CancellationToken cancel = default, bool refr
+                             results.Add(Item(who + " " + name, L10n.Get("Online", e.IsConnected ? "summary.noAccountSignIn" : "summary.songListNotLoaded")));
+                             continue;
+                         }
+-                        Activity = L10n.Format("Online", "activity.signingIn", who, name);
++                        Activity = UiText.InGameFormat("Signing {0} in to {1}…", who, name);
+                         try
+                         {
+                             string service = e.SsoService, accountToken = account.Token;
+@@ -313,8 +313,8 @@ public async Task LoadSongListAsync(CancellationToken cancel = default, bool ref
+                 {
+                     var e = endpoints[i];
+                     string name = e.Config.DisplayName;
+-                    if (cancel.IsCancellationRequested) { results.Add(Item(name, L10n.Get("Online", "summary.cancelled"))); continue; }
+-                    Activity = L10n.Format("Online", "activity.loadingSongList", i + 1, endpoints.Count, name);
++                    if (cancel.IsCancellationRequested) { results.Add(name + ": cancelled"); continue; }
++                    Activity = UiText.InGameFormat("Loading song list ({0} / {1}): {2}…", i + 1, endpoints.Count, name);
+                     try
+                     {
+                         await Client.LoadCatalogAsync(e, cancel);
+diff --git a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+index 19f9e62..687dbc4 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+@@ -109,8 +109,7 @@ void ShowExpiredAccounts(double now)
+             if (online == null) return;
+             var seats = Enumerable.Range(0, FanmadeEndpoint.SeatCount).Where(online.TakeExpired).Select(s => (s + 1) + "P").ToArray();
+             if (seats.Length == 0) return;
+-            string who = seats.Length == 1 ? seats[0] : L10n.Format("Menu", "entry.seatsAnd", seats[0], seats[1]);
+-            AccountNotice = L10n.Format("Menu", "entry.accountExpired", who);
++            AccountNotice = UiText.InGameFormat("{0}'s OurTaiko sign-in has expired. Sign in again in the game settings.", string.Join(" and ", seats));
+             var bar = SkinUi.Image("AccountNotice", stage, null, 1500, 84);
+             bar.color = new Color(0, 0, 0, 0.72f);
+             bar.rectTransform.Center(960, 150);
+@@ -131,6 +130,9 @@ void Bind()
+             Board = new EntryModeList(view, Clip(modeBoardTimeline), Clip(cursorGlowTimeline), Clip(modeListTimeline));
+             Modes = new EntryMode[Board.Boards.Count];
+             for (int i = 0; i < Modes.Length; i++) Modes[i] = Board.Boards[i].Mode;
++            // The board captions are authored in Japanese; show them in the in-game language.
++            foreach (var board in view.boards)
++                if (board.title != null) board.title.text = UiText.InGame(board.title.text);
+             Credit = new EntryCredit(view, Clip(creditRowTimeline), Clip(creditFadeTimeline));
+             Guide = new ControlGuideView(view.controlGuide, overlay);
+             Nameplate = view.nameplate;
+@@ -152,6 +154,20 @@ void Bind()
+                 int index = i;
+                 view.boards[i].hitRelay.Clicked = () => TapBoard(index);
+             }
++            // The board comments, credit rows and the 2P invite are authored in Japanese. Translate
++            // exactly those labels, not the whole stage: nameplates carry player names and titles.
++            foreach (var board in view.boards)
++            {
++                if (board.info == null) continue;
++                foreach (var line in board.info)
++                    if (line != null) line.text = UiText.InGame(line.text);
++            }
++            for (int i = 0; i < view.creditLabels.Length; i++) view.creditLabels[i].text = UiText.InGame(view.creditLabels[i].text);
++            for (int i = 0; i < view.creditMessages.Length; i++) view.creditMessages[i].text = UiText.InGame(view.creditMessages[i].text);
++            for (int i = 0; i < view.creditHighlights.Length; i++) view.creditHighlights[i].text = UiText.InGame(view.creditHighlights[i].text);
++            if (view.invitePlayer != null) view.invitePlayer.text = UiText.InGame(view.invitePlayer.text);
++            if (view.inviteMessage != null) view.inviteMessage.text = UiText.InGame(view.inviteMessage.text);
++            if (view.freePlay != null) view.freePlay.text = UiText.InGame(view.freePlay.text);
+         }
+ 
+         public Image TouchArea { get; private set; }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
+index 7e1d470..d803f3e 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/LocalSongLibrary.cs
+@@ -13,7 +13,7 @@ namespace OurTaiko
+     public sealed class LocalSongLibrary : MonoBehaviour
+     {
+         public static LocalSongLibrary Instance { get; private set; }
+-        public static string DefaultRoot => Path.Combine(GamePaths.Root, "Songs");
++        public static string DefaultRoot => GamePaths.SongsDirectory(GamePaths.Root);
+ 
+         public IReadOnlyList<string> Roots => roots;
+         // Charts outside box.def folders, by path; then the top-level box.def folders, which hold
+diff --git a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
+index 5e4226a..96849da 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
+@@ -33,6 +33,7 @@ void Awake()
+             online = OnlineManager.EnsureInstance();
+             card.alpha = 0;
+             progress.text = "";
++            if (hint != null) hint.text = UiText.InGame(hint.text);
+             touch.Clicked = Skip;
+             cancel = new CancellationTokenSource();
+         }
+@@ -56,7 +57,7 @@ void Update()
+             card.alpha = fadeSeconds <= 0 ? 1 : Mathf.Clamp01((float)(elapsed / fadeSeconds));
+             if (!work.IsCompleted)
+             {
+-                progress.text = Skipped ? L10n.Get("Menu", "presented.cancelling") : online.Activity;
++                progress.text = UiText.InGame(Skipped ? "Cancelling…" : online.Activity);
+                 return;
+             }
+             progress.text = "";

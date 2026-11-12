@@ -1,0 +1,374 @@
+diff --git a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
+index a61a639..65f8cde 100644
+--- a/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
++++ b/Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
+@@ -113,6 +113,10 @@ IEnumerator Start()
+             resultRestart.onClick.AddListener(Restart);
+             resultBack.onClick.AddListener(Back);
+             pausePanel.SetActive(false); resultPanel.SetActive(false);
++            // The pause and result panels' labels are authored in English and Japanese.
++            UiText.ApplyInGame(pausePanel.transform);
++            UiText.ApplyInGame(resultPanel.transform);
++            if (pauseButton != null && pauseButton.TryGetComponent<TMP_Text>(out var pauseLabel)) pauseLabel.text = UiText.InGame(pauseLabel.text);
+             if (drumPad != null) drumPad.gameObject.SetActive(playSettings.singlePlayerDrumPad);
+             hitAudio.PrepareAudioEffects(balloonPop, kusudamaPop, adLibHit, mineHit, danFailed, fusumaClose, fusumaOpen);
+             betweenClip = betweenTimeline != null ? LumenClip.Parse(betweenTimeline.text) : LumenClip.Empty;
+@@ -131,7 +135,7 @@ IEnumerator Start()
+             {
+                 Log.Exception("Play", error);
+                 IsFinished = true; resultPanel.SetActive(true);
+-                resultText.text = L10n.Format("Dan", "play.loadFailed", error.Message);
++                resultText.text = UiText.InGame("CHART COULD NOT LOAD") + "\n<size=22>" + error.Message + "</size>";
+             }
+             if (IsFinished) yield break;
+             // The first song's doors and clock start once the curtain has opened, as PlayScene's.
+@@ -332,6 +336,7 @@ void ShowCourse()
+             view.frame.sprite = view.frames[Mathf.Clamp(course.Color, 0, view.frames.Length - 1)];
+             view.horiName.text = course.Title(language);
+             view.horiName.Squeeze(200);
++            if (view.gaugeName != null) view.gaugeName.text = UiText.InGame(view.gaugeName.text);
+             // dan_info.lua: the gauge's border plate overhangs its threshold cell by 24 px.
+             var gauge = course.Exams.FirstOrDefault(e => e.Type == DanExamType.Gauge);
+             view.gaugePlate.gameObject.SetActive(gauge != null && gauge.Course.Red > 0);
+@@ -343,7 +348,7 @@ void ShowCourse()
+                 view.gaugePlate.anchoredPosition = new Vector2(Mathf.Max(0, Mathf.Floor((float)(x - 586 + 24) + 0.5f)), view.gaugePlate.anchoredPosition.y);
+                 // The cabinet's white strip, centred on that cell over the bar (YataiDON ships it but does not draw it).
+                 if (view.gaugeCell != null) view.gaugeCell.anchoredPosition = new Vector2(Mathf.Floor((float)x - 14 + 0.5f), view.gaugeCell.anchoredPosition.y);
+-                view.gaugeValue.text = gauge.Caption(gauge.Course.Red);
++                view.gaugeValue.text = $"{gauge.Course.Red} ％{UiText.InGame(gauge.Range == DanExamRange.Less ? "未満" : "以上")}";
+             }
+             view.between.gameObject.SetActive(false);
+         }
+@@ -368,8 +373,8 @@ void ShowRow(DanPlayView.ExamRowView row, DanExam exam, DanExamView state)
+             row.badge.sprite = view.badges[all ? 0 : 1 + Math.Min(SongIndex, 2)];
+             row.frameBackAll.enabled = row.frameFrontAll.enabled = all;
+             row.overlay1.enabled = row.overlay2.enabled = !all;
+-            row.icon.sprite = view.icons[(int)exam.Type];
+-            row.caption.text = state.HasBorder ? exam.Caption(state.Red) : "―";
++            row.icon.sprite = DanExamArt.Label((int)exam.Type, true) ?? view.icons[(int)exam.Type];
++            row.caption.text = state.HasBorder ? $"{state.Red} {UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上")}" : "―";
+             float full = all ? 972 : 648;
+             if (state.Failed) Fill(row.bar, row.rainbow, view.barFail, null, full, "fail", false);
+             else Fill(row.bar, row.rainbow, BarSprite(state.BarState, false), all ? view.rainbowAll : view.rainbow, full * state.Progress, state.BarState, false);
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs b/Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs
+new file mode 100644
+index 0000000..f1b01a9
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs
+@@ -0,0 +1,53 @@
++using System.Collections.Generic;
++using System.IO;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // The 段位道場 exam conditions are painted into sprites, so the translation table cannot reach
++    // them: the eight condition labels, the 合格条件 tab and the in-play panel's own label set. The
++    // patch build embeds Simplified and Traditional copies (tools/make-dan-exam-art.py); Japanese,
++    // and English which shows Japanese in game, keep the sprites shipped with the app.
++    static class DanExamArt
++    {
++        const string Prefix = "OurTaiko.Art.";
++        // DanExamType order.
++        static readonly string[] Names = { "gauge", "judgeperfect", "judgegood", "judgebad", "hit", "score", "combo", "roll" };
++        static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
++        static bool missing;
++
++        // A condition's label; inGame picks the smaller set the play scene draws.
++        public static Sprite Label(int type, bool inGame = false)
++        {
++            if (type < 0 || type >= Names.Length) return null;
++            return Load((inGame ? "exam_play_" : "exam_") + Names[type]);
++        }
++
++        // The 合格条件 tab above the conditions.
++        public static Sprite Header() => Load("exam_header");
++
++        // The confirmation popup: "text" (the question), "yes", "no".
++        public static Sprite Confirm(string part) => Load("confirm_" + part);
++
++        static Sprite Load(string name)
++        {
++            string language = UiText.InGameLanguage(UiText.Language);
++            if (language != "zh" && language != "zh_tw") return null;
++            if (missing) return null;
++            string key = name + ":" + language;
++            if (Cache.TryGetValue(key, out var cached)) return cached;
++            using var stream = typeof(DanExamArt).Assembly.GetManifestResourceStream(Prefix + name + "." + language + ".png");
++            if (stream == null) { missing = true; return null; }
++            using var memory = new MemoryStream();
++            stream.CopyTo(memory);
++            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
++            if (!texture.LoadImage(memory.ToArray())) { missing = true; return null; }
++            texture.wrapMode = TextureWrapMode.Clamp;
++            texture.filterMode = FilterMode.Bilinear;
++            var sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
++            sprite.name = name;
++            Cache[key] = sprite;
++            return sprite;
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs b/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
+index 5f279d0..c467f2d 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
+@@ -2,6 +2,7 @@
+ using System.Collections.Generic;
+ using System.Linq;
+ using Newtonsoft.Json.Linq;
++using TMPro;
+ using UnityEngine;
+ using UnityEngine.UI;
+ 
+@@ -287,7 +288,7 @@ void Bind()
+ 
+             view.emblem.sprite = view.emblems[Mathf.Clamp(course.Color, 0, view.emblems.Length - 1)];
+             // The arcade plate: the name large and top to bottom, and again small across its foot.
+-            string title = course.Title(language);
++            string title = UiText.InGame(course.Title(language));
+             if (view.danName != null) view.danName.text = string.Join("\n", title.Where(c => !char.IsWhiteSpace(c)).Select(c => c.ToString()));
+             view.horiName.text = title;
+             view.horiName.Squeeze(240);
+@@ -310,9 +311,17 @@ void Bind()
+             bool best = Recorded && PreviousBest.HasValue && Result.Verdict > 0 && Result.Verdict >= PreviousBest.Value.Verdict
+                 && Result.Score > PreviousBest.Value.Score;
+             view.bestScore.gameObject.SetActive(best);
++            if (view.bestScore != null)
++            {
++                var caption = view.bestScore.Find("Caption");
++                if (caption != null && caption.TryGetComponent<TMP_Text>(out var captionText))
++                    captionText.text = UiText.InGame(captionText.text);
++            }
+             bestScoreY = view.bestScore.anchoredPosition.y;
+             if (best) view.bestScoreDigits = Digits(view.bestScoreDigits, (Result.Score - PreviousBest.Value.Score).ToString(), view.bestScoreDigitSprites, RightEdge(view.bestScoreDigits), 14.17f);
+             view.noSave.gameObject.SetActive(!Recorded);
++            // The hint is authored in Japanese.
++            UiText.ApplyInGame(view.noSave);
+             BindCelebration(course);
+         }
+ 
+@@ -420,7 +429,7 @@ void BindExams()
+                 if (!shown) continue;
+                 var exam = course.Exams[i];
+                 var state = Result.Progress.View(i, live: false);
+-                row.icon.sprite = view.examIcons[(int)exam.Type];
++                row.icon.sprite = DanExamArt.Label((int)exam.Type) ?? view.examIcons[(int)exam.Type];
+                 bool gauge = i == gaugeIndex;
+                 row.gauge.gameObject.SetActive(gauge);
+                 row.all.gameObject.SetActive(!gauge && !exam.PerSong);
+@@ -465,7 +474,11 @@ double[] ExamTravel()
+             return travel;
+         }
+ 
+-        static string Caption(DanExam exam, int red) => exam.Caption(red);
++        static string Caption(DanExam exam, int red)
++        {
++            string range = UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上");
++            return exam.Type == DanExamType.Gauge ? $"{red} ％{range}" : $"{red} {range}";
++        }
+ 
+         Sprite Bar(string state, bool song) => state switch
+         {
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
+index 2b51173..77d7078 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
+@@ -83,6 +83,18 @@ void Awake()
+             // 段位道場 is single-player: Entry keeps 2P off its board, and the course plays one seat.
+             switcher.SeatLeadAlone();
+             language = SettingManager.EnsureInstance().Settings.general.Language;
++            // The 合格条件 tab is painted art: swap it for the translated copy (a lookup by name,
++            // since a serialized field would shift the scene's component layout).
++            var header = GameObject.Find("ExamHeader");
++            if (header != null && header.TryGetComponent(out Image headerImage) && DanExamArt.Header() is Sprite headerSprite)
++                headerImage.sprite = headerSprite;
++            // The confirmation popup is painted too: its question and the two answers.
++            if (view.confirm != null)
++                foreach (var image in view.confirm.GetComponentsInChildren<Image>(true))
++                {
++                    string part = image.gameObject.name switch { "Text" => "text", "Yes" => "yes", "No" => "no", _ => null };
++                    if (part != null && DanExamArt.Confirm(part) is Sprite sprite) image.sprite = sprite;
++                }
+             Load();
+             var all = pages.SelectMany(p => p.Courses).Where(c => !c.IsGaiden).ToList();
+             switcher.DanIndexMax = all.Count > 0 ? all.Max(c => c.Course.DanIndex) : -1;
+@@ -93,6 +105,9 @@ void Awake()
+             switcher.SceneChanging += OnSceneChanging;
+             FullIntro = switcher.FromScene == SceneSwitcher.EntryScene;
+             if (intro != null) intro.Show(DanIntroView.Frame(FullIntro, 0));
++            // The saved 演奏オプション board and the empty-page hint are authored in Japanese.
++            if (codeEntry != null) codeEntry.ApplyLanguage();
++            if (view.empty != null) view.empty.text = UiText.InGame(view.empty.text);
+             Show(Now);
+         }
+ 
+@@ -408,13 +423,13 @@ public void SubmitCode(string typed)
+         {
+             if (!IsEnteringCode || lookup != null) return;
+             string code = DanSelectPages.CleanCode(typed);
+-            if (code == null) { codeEntry.Say(L10n.Get("Dan", "code.invalid")); return; }
++            if (code == null) { codeEntry.Say(UiText.InGame("英数字 6 文字のコードを入力してください")); return; }
+             string server = pages[Page].Server;
+             var endpoint = Online.OnlineManager.EnsureInstance().Client?.Endpoints
+                 .FirstOrDefault(e => string.Equals(e.Config.baseUrl.TrimEnd('/'), server, StringComparison.OrdinalIgnoreCase) && e.IsConnected);
+-            if (endpoint == null) { codeEntry.Say(L10n.Get("Dan", "code.notConnected")); return; }
++            if (endpoint == null) { codeEntry.Say(UiText.InGame("サーバーに接続していません")); return; }
+             Play(sfx, don, true);
+-            codeEntry.Say(L10n.Get("Dan", "code.searching"));
++            codeEntry.Say(UiText.InGame("検索中…"));
+             codeEntry.field.interactable = false;
+             lookupCode = code;
+             lookup = endpoint.RequestAsync("/api/v1/game/dans/" + code);
+@@ -430,14 +445,16 @@ void PollLookup()
+             if (task.IsFaulted || task.IsCanceled)
+             {
+                 var error = task.Exception?.InnerExceptions.FirstOrDefault();
+-                codeEntry.Say(error is Online.HttpStatusException { Status: 404 } ? L10n.Format("Dan", "code.notFound", lookupCode) : L10n.Format("Dan", "code.failed", error?.Message ?? "?"));
++                codeEntry.Say(error is Online.HttpStatusException { Status: 404 }
++                    ? UiText.InGameFormat("コード {0} の段位はありません", lookupCode)
++                    : UiText.InGameFormat("取得できませんでした: {0}", error?.Message ?? "?"));
+                 return;
+             }
+             DanCourseEntry entry;
+             try { entry = resolver.Resolve(DanCourse.From(Online.Json.Parse(task.Result), pages[Page].Server), pages[Page].Server + "/api/v1/game/dans/" + lookupCode); }
+             catch (Exception error) when (error is FormatException || error is Online.FanmadeException)
+             {
+-                codeEntry.Say(L10n.Format("Dan", "code.failed", error.Message));
++                codeEntry.Say(UiText.InGameFormat("取得できませんでした: {0}", error.Message));
+                 return;
+             }
+             int index = DanSelectPages.Insert(pages[Page], entry);
+@@ -541,9 +558,9 @@ public static float CursorAlpha(double ms)
+         // the course's own name (a local or unranked course). The plate carries the full name.
+         public string ChipLabel(DanCourseEntry entry)
+         {
+-            if (entry.IsGaiden) return DanSelectPages.GaidenTitle;
++            if (entry.IsGaiden) return UiText.InGame(DanSelectPages.GaidenTitle);
+             int rank = entry.Course.DanIndex;
+-            return rank >= 0 ? DanResultFlow.RankName(rank) : entry.Course.Title(language);
++            return rank >= 0 ? UiText.InGame(DanResultFlow.RankName(rank)) : entry.Course.Title(language);
+         }
+ 
+         // The yellow board opens like the song wheel's (animations 13–18); its contents fade in last.
+@@ -572,14 +589,14 @@ void ShowCourse(DanCourseEntry entry)
+         {
+             var course = entry.Course;
+             view.frame.sprite = view.frames[Mathf.Clamp(course.Color, 0, view.frames.Length - 1)];
+-            view.horiName.text = Vertical(course.Title(language));
++            view.horiName.text = Vertical(entry.IsGaiden ? UiText.InGame(course.Title(language)) : course.Title(language));
+             if (entry.IsGaiden)
+             {
+                 // The 外伝 plate: no songs or exams, the hint where the course list would be.
+                 foreach (var row in view.songs) row.root.gameObject.SetActive(false);
+                 view.exams.gameObject.SetActive(false);
+                 view.error.gameObject.SetActive(true);
+-                view.error.text = L10n.Get("Dan", "select.gaidenHint");
++                view.error.text = UiText.InGame("段位コードを入力して、一覧にない段位に挑戦できます。\nドンでコードを入力");
+                 return;
+             }
+             for (int i = 0; i < view.songs.Length; i++)
+@@ -590,7 +607,7 @@ void ShowCourse(DanCourseEntry entry)
+                 if (shown) ShowSong(row, i, course.Songs[i], entry.IsPlayable ? entry.Songs[i] : null);
+             }
+             view.error.gameObject.SetActive(!entry.IsPlayable);
+-            view.error.text = entry.Error ?? "";
++            view.error.text = UiText.InGame(entry.Error ?? "");
+             view.exams.gameObject.SetActive(entry.IsPlayable);
+             if (entry.IsPlayable) ShowExams(course, DanRecordStore.Shared != null ? DanRecordStore.Shared.ExamBests(DanRecordStore.Key(entry), course) : null);
+         }
+@@ -634,7 +651,7 @@ void ShowExams(DanCourse course, int?[][] bests)
+             view.gauge.gameObject.SetActive(gauge != null);
+             if (gauge != null)
+             {
+-                view.gaugeIcon.sprite = view.examIcons[(int)DanExamType.Gauge];
++                view.gaugeIcon.sprite = DanExamArt.Label((int)DanExamType.Gauge) ?? view.examIcons[(int)DanExamType.Gauge];
+                 view.gaugeCaption.text = Caption(gauge, gauge.Course.Red);
+                 bestLines.ShowGauge(BestText(gauge, bests, gaugeIndex, 0));
+             }
+@@ -647,7 +664,7 @@ void ShowExams(DanCourse course, int?[][] bests)
+                 if (!shown) continue;
+                 var exam = rest[i];
+                 int examIndex = course.Exams.IndexOf(exam);
+-                row.icon.sprite = view.examIcons[(int)exam.Type];
++                row.icon.sprite = DanExamArt.Label((int)exam.Type) ?? view.examIcons[(int)exam.Type];
+                 int segments = exam.PerSong ? Math.Min(course.Songs.Count, row.segments.Length) : 1;
+                 for (int k = 0; k < row.segments.Length; k++)
+                 {
+@@ -671,8 +688,12 @@ static string BestText(DanExam exam, int?[][] bests, int exam_index, int segment
+             return exam.Type == DanExamType.Gauge ? value + " %" : value.ToString();
+         }
+ 
+-        // skin_config dan_exam_text_*: "100 ％以上", "5 未満".
+-        static string Caption(DanExam exam, int red) => exam.Caption(red);
++        // skin_config dan_exam_text_* (ja), as the rest of the Nijiiro screens are: "100 ％以上", "5 未満".
++        static string Caption(DanExam exam, int red)
++        {
++            string range = UiText.InGame(exam.Range == DanExamRange.Less ? "未満" : "以上");
++            return exam.Type == DanExamType.Gauge ? $"{red} ％{range}" : $"{red} {range}";
++        }
+ 
+         void ShowConfirm(double now)
+         {
+diff --git a/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs b/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
+index c3db38f..7ada225 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
+@@ -23,7 +23,7 @@ public PageTabs(RectTransform canvas, TextMeshProUGUI style, IReadOnlyList<strin
+             {
+                 int index = i;
+                 var back = DanSelectUi.Box("Tab" + i, root, i * (Width + Gap), 0, Width, Height, new Color(0, 0, 0, 0.55f));
+-                var label = DanSelectUi.Text("Label", back.rectTransform, style, titles[i], 26, 0, 0, Width, Height);
++                var label = DanSelectUi.Text("Label", back.rectTransform, style, UiText.InGame(titles[i]), 26, 0, 0, Width, Height);
+                 var hit = back.gameObject.AddComponent<PointerRelay>();
+                 hit.Clicked = () => tapped(index);
+                 backs.Add(back);
+@@ -91,7 +91,7 @@ public CodeEntry(RectTransform canvas, TextMeshProUGUI style, Action<string> sub
+ 
+         public void Open(string pageTitle)
+         {
+-            title.text = L10n.Format("Dan", "code.titleFor", pageTitle);
++            title.text = UiText.InGame(pageTitle) + UiText.InGame(" の段位コードを入力");
+             field.text = "";
+             field.interactable = true;
+             message.text = "";
+@@ -106,6 +106,12 @@ public void Close()
+         }
+ 
+         public void Say(string text) => message.text = text;
++
++        // The box's title, hint and placeholder are authored in Japanese.
++        public void ApplyLanguage()
++        {
++            if (root != null) UiText.ApplyInGame(root);
++        }
+     }
+ 
+     // The 段位 plates' lettering. The plaque art (yellow_box/frame, loading_dan/plaque, 280×560) is
+@@ -169,7 +175,7 @@ public sealed class ExamBestLines
+ 
+         public ExamBestLines(DanSelectView view)
+         {
+-            gaugeLabel = Make("BestLabel", view.gaugeCaption, Label, LabelSize, TextAlignmentOptions.Left, GaugeBelow);
++            gaugeLabel = Make("BestLabel", view.gaugeCaption, UiText.InGame(Label), LabelSize, TextAlignmentOptions.Left, GaugeBelow);
+             gaugeValue = Make("BestValue", view.gaugeCaption, "", ValueSize, TextAlignmentOptions.Right, GaugeBelow);
+             labels = new TextMeshProUGUI[view.examRows.Length][];
+             values = new TextMeshProUGUI[view.examRows.Length][];
+@@ -180,7 +186,7 @@ public ExamBestLines(DanSelectView view)
+                 values[i] = new TextMeshProUGUI[row.captions.Length];
+                 for (int k = 0; k < row.captions.Length; k++)
+                 {
+-                    labels[i][k] = Make("BestLabel", row.captions[k], Label, LabelSize, TextAlignmentOptions.Left);
++                    labels[i][k] = Make("BestLabel", row.captions[k], UiText.InGame(Label), LabelSize, TextAlignmentOptions.Left);
+                     values[i][k] = Make("BestValue", row.captions[k], "", ValueSize, TextAlignmentOptions.Right);
+                 }
+             }
+@@ -209,7 +215,7 @@ static TextMeshProUGUI Make(string name, TextMeshProUGUI caption, string text, f
+             label.outlineWidth = caption.outlineWidth;
+             label.outlineColor = caption.outlineColor;
+             label.margin = alignment == TextAlignmentOptions.Left ? new Vector4(LabelInset, 0, 0, 0) : Vector4.zero;
+-            label.text = text;
++            label.text = UiText.InGame(text);
+             return label;
+         }
+ 

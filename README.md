@@ -1,18 +1,21 @@
 # OurTaikoPlay 补丁包 · play-preferences
 
-给已安装的 **OurTaikoPlay.app**（1.0-349 ~ 1.0.1-467，Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打上
+给已安装的 **OurTaikoPlay.app**（1.0-349 ~ 1.0.1-505，Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打上
 `play-preferences` 补丁，**不需要 Unity 编辑器**。
 
-**1.0.1-480：** 使用 `play-preferences-1.0.1-480.patch`，基于官方提交
-`1863545c07674dc272c0e48e9378f49e30735bec`。这一版保留新版音频时钟、回放和内置服务器行为，
-补齐歌曲时钟设置的译文，并移除上游已删除的登录场景补丁。
-`play-preferences.patch` 仍是 467 及此前的基线；480 请使用上面的专用补丁。
+**1.0.1-505：** 使用 `play-preferences-1.0.1-505.patch`，基于官方提交
+`6342b3c`（`feat(i18n): the interface in English, Japanese and Simplified Chinese (#90)`）。
+这一版上游自己带了 Unity Localization（英文 / 日文 / 简体），补丁在此基础上保留
+`UiText` 嵌入式译文表，额外提供繁体与韩文，并让设置页的行标题 / 说明 / 选项走
+`UiText.Settings()`、页面标题与分组走上游 `SettingsCatalog.T()`。上游新增的
+`LocalizedText` 文本会被 `UiText.ApplyInGame` 跳过，避免二次翻译。
+`play-preferences.patch` 仍是 467 及此前的基线；480 / 505 请使用各自的专用补丁。
 
-本机 480 的构建源码保存在 `tools/build/source-1.0.1-480/`，已编译 DLL 在
-`tools/build/1.0.1-480/OurTaiko.Runtime.dll`。重新安装本机构建：
+本机 505 的构建源码保存在 `tools/build/source-1.0.1-505-nolfs/`，已编译 DLL 在
+`tools/build/1.0.1-505/OurTaiko.Runtime.dll`。重新安装本机构建：
 
 ```bash
-tools/install.sh tools/build/1.0.1-480/OurTaiko.Runtime.dll --launch
+tools/install.sh tools/build/1.0.1-505/OurTaiko.Runtime.dll --launch
 ```
 
 游戏逻辑全在 `Contents/Resources/Data/Managed/OurTaiko.Runtime.dll` 里。补丁的落地方式：
@@ -26,18 +29,21 @@ tools/install.sh tools/build/1.0.1-480/OurTaiko.Runtime.dll --launch
 | 界面语言 | 设置菜单（英 / 日 / 简 / 繁 / 韩）与游戏内文字（日 / 简 / 繁，英韩回落日文）；设置页标题、入口看板、声音页、账号页、按键项、提示与状态行全部走译文表 |
 | 简繁字体 | 简体、繁体界面引用游戏自身的 `FOT-OedKtr Std E`（`大江户勘亭流.otf`）；字体在构建时嵌入 `OurTaiko.Runtime.dll`，运行时释放到缓存并生成 TMP 动态字体。文字沿用原材质的描边（`Nijiiro UI SDF Outline`），字体与材质成对替换/还原 |
 | 结算页面 | 难度页签、判定标签、成绩 / 通关、曲目序号等日文切图与文本按简繁重绘；简繁结算贴图同样嵌入 DLL |
-| 飞出音符绘制 | 显示设置新增「飞出音符」（图片 / 精灵）与「飞出数量」（高 / 中 / 低） |
 
-保留上游的背景影片设置（背景影片、影片时轨道不透明度），加上飞出音符两项，显示页共 8 项。
+保留上游的背景影片设置（背景影片、影片时轨道不透明度）。
 
 上游从 1.0-400 起把设置场景换成了运行时搭的 `SettingsOverlay`（`Runtime/Settings/`）：
-页面 / 分组 / 行的标题与说明在 `SettingsCatalog` 里按英文写好，由 `UiText.Settings()` 在
-构建时翻译，因此译文表是唯一的文案来源；语言行改回「语言」，同时管界面与游戏内文字。
+页面 / 分组 / 行的标题与说明在 `SettingsCatalog` 里按英文写好。1.0.1-505 起上游改用
+Unity Localization（`Localization/Tables/*.asset`，运行期从 `data.unity3d` 读，补丁加不了键），
+所以页面标题与分组走 `SettingsCatalog.T(key)` 读上游 `Settings.csv`，行标题 / 说明 / 选项
+走补丁自己的 `UiText.Settings()`。语言行同时管界面与游戏内文字。
 
 ## 目录
 
 ```
-play-preferences.patch                    完整补丁（基于 upstream/main @ 4c3961b，兼容 1.0-349 ~ 1.0.1-467）
+play-preferences-1.0.1-505.patch          完整补丁（基于 upstream/main @ 6342b3c，对应 1.0.1-505）
+play-preferences-1.0.1-480.patch          上一版存档（基线 1863545，对应 1.0.1-480）
+play-preferences.patch                    旧基线补丁（4c3961b，兼容 1.0-349 ~ 1.0.1-467）
 FOT-OedKtrStdE.otf                        简繁界面与结算切图字体（大江户勘亭流，补了 6 个繁体 cmap 别名；构建时嵌入 DLL）
 play-preferences-upstream-e8fc18a.patch   上一版存档（基线 e8fc18a）
 README.md                                 本文
@@ -62,10 +68,10 @@ backup/                                   原版 DLL 与设置备份（不进仓
 tools/save-original.sh
 
 # 1) 编译
-tools/build-runtime-dll.sh "/Users/vincent/Documents/开发/OurTaikoPlay" /Applications/OurTaikoPlay.app
+tools/build-runtime-dll.sh tools/build/source-1.0.1-505-nolfs /Applications/OurTaikoPlay.app
 
 # 2) 安装（默认不启动游戏，需要启动时加 --launch）
-tools/install.sh
+tools/install.sh tools/build/1.0.1-505/OurTaiko.Runtime.dll
 ```
 
 ## APP 更新后重新打补丁
@@ -74,6 +80,14 @@ tools/install.sh
 
 ```bash
 tools/patch-app.sh --launch
+```
+
+版本已经切到 505 这类带专用补丁的版本时，指向那棵树和补丁：
+
+```bash
+tools/patch-app.sh \
+  --source tools/build/source-1.0.1-505-nolfs \
+  --patch play-preferences-1.0.1-505.patch --launch
 ```
 
 它会自己判断要做哪一步：版本号 → 原版 DLL 有没有存过 → 上游有没有新提交 →
@@ -85,6 +99,7 @@ tools/patch-app.sh --launch
 | --- | --- |
 | `--app <路径>` | 换一个 .app（默认 `/Applications/OurTaikoPlay.app`） |
 | `--source <路径>` | 换补丁源码树（默认 `../OurTaikoPlay`） |
+| `--patch <文件>` | 换补丁文件（默认 `play-preferences.patch`；505 用 `play-preferences-1.0.1-505.patch`） |
 | `--no-fetch` | 不拉上游（离线，或上游 ref 已在本地） |
 | `--no-install` | 只编译和检查，不安装 |
 | `--from-tree` | 把当前源码树认作新补丁（手改代码、解完冲突后用它） |
@@ -102,15 +117,20 @@ tools/save-original.sh
 
 # 2) 把补丁重放到新的上游代码（有冲突会列出来）
 tools/update-source.sh upstream/main "/Users/vincent/Documents/开发/OurTaikoPlay"
-#    在 ../OurTaikoPlay 里解冲突 → 重新生成 play-preferences.patch：
-#    cd ../OurTaikoPlay && git diff upstream/main > ../OurTaikoPlay-patch/play-preferences.patch
+#    在源码树里解冲突 → 重新生成对应版本的补丁。例如 505：
+#    cd tools/build/source-1.0.1-505-nolfs
+#    git add -A && git diff --cached HEAD > ../../../play-preferences-1.0.1-505.patch
 
 # 3) 用新装 app 自带的程序集重新编译
-tools/build-runtime-dll.sh "/Users/vincent/Documents/开发/OurTaikoPlay" /Applications/OurTaikoPlay.app
+tools/build-runtime-dll.sh tools/build/source-1.0.1-505-nolfs /Applications/OurTaikoPlay.app
 
 # 4) 安装
-tools/install.sh
+tools/install.sh tools/build/1.0.1-505/OurTaiko.Runtime.dll
 ```
+
+505 的源码树 `tools/build/source-1.0.1-505-nolfs/` 是独立浅克隆，`git add -A` 之后
+`git diff --cached HEAD` 就是当前完整补丁；Art 资源是 Git LFS，从上一版树里拷 `.git/lfs/objects`
+再 `lfs checkout` 即可。
 
 冲突高发文件：`PlayScene.cs` / `PlayerLane.cs`（判定逻辑位置）、
 `SettingsMenu.cs` + `GameSettings.cs`（设置项顺序）、`UiText.cs`（译文表键）。

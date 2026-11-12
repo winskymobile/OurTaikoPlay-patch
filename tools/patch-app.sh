@@ -1,7 +1,7 @@
 #!/bin/bash
 # Take the patch from "the app was updated" to "the patched app is installed".
 #
-#   patch-app.sh [--app <bundle>] [--source <tree>] [--upstream <ref>] [--launch]
+#   patch-app.sh [--app <bundle>] [--source <tree>] [--patch <file>] [--upstream <ref>] [--launch]
 #                [--from-tree] [--no-fetch] [--no-install]
 #
 # Steps:
@@ -13,6 +13,7 @@
 #   6. install: quit the game, back up, copy, merge settings.json
 #
 # --from-tree   adopt the source tree as the new patch (after resolving conflicts)
+# --patch       patch file to apply and regenerate (default play-preferences.patch)
 # --no-fetch    do not fetch upstream (offline, or the ref is already local)
 # --no-install  build and check only
 #
@@ -21,7 +22,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-PATCH="$ROOT/play-preferences.patch"
+PATCH=$ROOT/play-preferences.patch
 BRANCH=play-preferences
 
 APP=/Applications/OurTaikoPlay.app
@@ -40,6 +41,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --app) APP=$2; shift 2 ;;
     --source) SRC=$2; shift 2 ;;
+    --patch) PATCH=$2; shift 2 ;;
     --upstream) REF=$2; shift 2 ;;
     --launch) LAUNCH=1; shift ;;
     --from-tree) FROM_TREE=1; shift ;;
@@ -52,6 +54,12 @@ done
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+# The script cds into the source tree later, so take absolute paths up front.
+abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$(pwd)" "$1" ;; esac; }
+APP=$(abspath "$APP")
+SRC=$(abspath "$SRC")
+PATCH=$(abspath "$PATCH")
 
 # ---------------------------------------------------------------- preflight
 step "preflight"
@@ -94,19 +102,28 @@ say "original  $ORIG"
 step "put the patch on $REF"
 
 cd "$SRC"
+# The tree's remote is "upstream" in the main development checkout and "origin" in the
+# per-version shallow clones under tools/build/. Fetch whichever one backs $REF.
+if ! git rev-parse --verify "$REF" >/dev/null 2>&1 && [ "${REF#upstream/}" != "$REF" ] \
+   && git rev-parse --verify "origin/${REF#upstream/}" >/dev/null 2>&1; then
+  say "no $REF here; using origin/${REF#upstream/}"
+  REF="origin/${REF#upstream/}"
+fi
+REMOTE=$(printf '%s' "$REF" | cut -d/ -f1)
+if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then REMOTE=origin; fi
 if [ "$DO_FETCH" = 1 ]; then
   # The repository's own http.proxy is the usual cause of a failed fetch; the shell's
   # proxy and a direct connection are tried in turn. Tags are left alone: an existing
   # release tag in the local clone would make --tags fail for no benefit.
-  if ! git fetch upstream --prune >/dev/null 2>"$TMP/fetch.err"; then
+  if ! git fetch "$REMOTE" --prune >/dev/null 2>"$TMP/fetch.err"; then
     PROXY=${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}
-    if [ -n "$PROXY" ] && git -c http.proxy="$PROXY" fetch upstream --prune >/dev/null 2>&1; then
+    if [ -n "$PROXY" ] && git -c http.proxy="$PROXY" fetch "$REMOTE" --prune >/dev/null 2>&1; then
       say "fetched through $PROXY (the repository's own http.proxy did not work)"
-    elif git -c http.proxy= fetch upstream --prune >/dev/null 2>&1; then
+    elif git -c http.proxy= fetch "$REMOTE" --prune >/dev/null 2>&1; then
       say "fetched without a proxy"
     else
       sed 's/^/  /' "$TMP/fetch.err" >&2
-      die "could not fetch upstream; fix the proxy (git config http.proxy) or pass --no-fetch"
+      die "could not fetch $REMOTE; fix the proxy (git config http.proxy) or pass --no-fetch"
     fi
   fi
 fi

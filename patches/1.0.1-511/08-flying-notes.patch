@@ -1,0 +1,303 @@
+diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+index 6f657a3..77918d9 100644
+--- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
++++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+@@ -28,6 +28,8 @@ public static GameSettings FromJson(string json)
+             settings.play ??= new PlaySettings();
+             settings.play.timingDisplay = settings.play.TimingDisplay;
+             settings.display ??= new DisplaySettings();
++            settings.display.flyingNoteDraw = settings.display.FlyingNoteDraw;
++            settings.display.flyingAmount = settings.display.FlyingAmount;
+             settings.audio ??= new AudioOptions();
+             settings.audio.volume ??= new SoundVolumes();
+             settings.audio.backend = settings.audio.Backend;
+@@ -171,7 +173,16 @@ public sealed class DisplaySettings
+         public const int MovieLaneOpacityDefault = 40, MovieLaneOpacityStep = 5;
+         public int movieLaneOpacity = MovieLaneOpacityDefault;
+         public float MovieLaneAlpha => Mathf.Clamp(movieLaneOpacity, 0, 100) / 100f;
+-
++        // 0: today's interface images. 1: sprites. Anything else is treated as 0.
++        public const int FlyingCurrent = 0, FlyingSprite = 1;
++        public int flyingNoteDraw = FlyingCurrent;
++        public int FlyingNoteDraw => flyingNoteDraw == FlyingSprite ? FlyingSprite : FlyingCurrent;
++        // 0: every hit flies. 1: normal notes fly, drumroll hits do not. 2: nothing flies.
++        public const int FlyingHigh = 0, FlyingMedium = 1, FlyingLow = 2;
++        public int flyingAmount = FlyingHigh;
++        public int FlyingAmount => flyingAmount == FlyingMedium || flyingAmount == FlyingLow ? flyingAmount : FlyingHigh;
++        public bool Flies(bool drumrollHit) =>
++            FlyingAmount == FlyingHigh || FlyingAmount == FlyingMedium && !drumrollHit;
+         // Applies these settings to the running player; render every frame (no frame skipping).
+         public void Apply()
+         {
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
+index 4daac36..165492f 100644
+--- a/Assets/OurTaiko/Runtime/Core/UiText.cs
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
+@@ -63,6 +63,21 @@ public static class UiText
+                     "暫停或結束後瀏覽練習譜面時，顯示每個音符的偏早、偏晚與漏打標記。"),
+             ["Switch to Practice"] = Row("練習モードへ", "切换到练习模式", "切換到練習模式"),
+             ["Switch to Normal Play"] = Row("通常演奏へ", "切换到普通演奏", "切換到普通演奏"),
++            ["Flying Notes"] = Row("飛び出す音符", "飞出音符", "飛出音符"),
++            ["Images draws each flying note as an interface image. Sprites uses the same drawing as the notes on the lane, still one note for every hit."] =
++                Row("「画像」は界面の画像で飛ばします。「スプライト」は譜面の音符と同じ描き方で、ヒットごとに飛ばします。",
++                    "「图片」用界面图片绘制飞出的音符。「精灵」和谱面音符用同一种画法，仍然每击一颗。",
++                    "「圖片」用介面圖片繪製飛出的音符。「精靈」和譜面音符用同一種畫法，仍然每擊一顆。"),
++            ["Images"] = Row("画像", "图片", "圖片"),
++            ["Sprite"] = Row("スプライト", "精灵", "精靈"),
++            ["Flying Amount"] = Row("飛ぶ数", "飞出数量", "飛出數量"),
++            ["High: every hit flies. Medium: normal notes fly, drumroll hits do not. Low: nothing flies."] =
++                Row("高：ヒットごとに飛ぶ。中：普通の音符だけ飛び、連打は飛ばない。低：飛ばない。",
++                    "高：每击都飞。中：普通音符飞，连打不飞。低：不飞。",
++                    "高：每擊都飛。中：普通音符飛，連打不飛。低：不飛。"),
++            ["High"] = Row("高", "高", "高"),
++            ["Medium"] = Row("中", "中", "中"),
++            ["Low"] = Row("低", "低", "低"),
+             ["演奏ゲーム"] = Row("演奏ゲーム", "演奏游戏", "演奏遊戲"),
+             ["練習モード"] = Row("練習モード", "练习模式", "練習模式"),
+             ["段位道場"] = Row("段位道場", "段位道场", "段位道場"),
+diff --git a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs b/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
+index d6a281c..a839b27 100644
+--- a/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
++++ b/Assets/OurTaiko/Runtime/Play/LaneSprite.cs
+@@ -39,6 +39,8 @@ void Fit()
+             var source = spriteRenderer.sprite;
+             if (source == null) return;
+             var size = rect.rect.size;
++            // A rect created this frame can still report an empty rect before the canvas lays out.
++            if (size.x < 1f || size.y < 1f) size = rect.sizeDelta;
+             var pixels = source.rect.size;
+             var child = spriteRenderer.transform;
+             child.localScale = new Vector3(size.x * source.pixelsPerUnit / pixels.x,
+diff --git a/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs b/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
+index 720adc3..3e13072 100644
+--- a/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
++++ b/Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
+@@ -26,7 +26,15 @@ public Material Material
+         {
+             get
+             {
+-                if (material == null) material = new Material(sourceMaterial) { name = name + " Clip" };
++                if (material == null)
++                {
++                    material = sourceMaterial != null
++                        ? new Material(sourceMaterial)
++                        : new Material(Shader.Find("OurTaiko/Lane Sprite"));
++                    material.name = name + " Clip";
++                    if (clipRect == null)
++                        material.SetVector(ClipId, new Vector4(-Unbounded, -Unbounded, Unbounded, Unbounded));
++                }
+                 return material;
+             }
+         }
+diff --git a/Assets/OurTaiko/Runtime/Play/NoteArcView.cs b/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
+index aa6870a..551954a 100644
+--- a/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
++++ b/Assets/OurTaiko/Runtime/Play/NoteArcView.cs
+@@ -14,16 +14,19 @@ public sealed class NoteArcView : MonoBehaviour
+         public int seat;
+ 
+         const float NoteSize = 192;
+-        readonly List<Arc> active = new List<Arc>(), pool = new List<Arc>();
++        readonly List<Arc> active = new List<Arc>(), imagePool = new List<Arc>(), spritePool = new List<Arc>();
++        LaneSpriteLayer spriteLayer;
+ 
+         sealed class Arc
+         {
+             public RectTransform Root;
+             public UnityEngine.UI.Image Image;
++            public LaneSprite Sprite;
+             public double Start;
+             public bool Big;
+             // Where the judge was when the note was hit, relative to its home (lane-local, y down).
+             public double StartDx, StartDy;
++            public bool UsesSprite => Sprite != null;
+         }
+ 
+         public int ActiveCount => active.Count;
+@@ -31,20 +34,13 @@ sealed class Arc
+ 
+         public void Spawn(Sprite sprite, bool big, double time, double startDx = 0, double startDy = 0)
+         {
++            bool sprites = UseSprites();
++            var pool = sprites ? spritePool : imagePool;
+             Arc arc;
+             if (pool.Count > 0) { arc = pool[pool.Count - 1]; pool.RemoveAt(pool.Count - 1); }
+-            else
+-            {
+-                var root = new GameObject("NoteArc", typeof(RectTransform)).GetComponent<RectTransform>();
+-                root.SetParent(transform, false);
+-                root.anchorMin = root.anchorMax = new Vector2(0, 1);
+-                root.pivot = new Vector2(0.5f, 0.5f);
+-                root.sizeDelta = new Vector2(NoteSize, NoteSize);
+-                var image = root.gameObject.AddComponent<UnityEngine.UI.Image>();
+-                image.raycastTarget = false;
+-                arc = new Arc { Root = root, Image = image };
+-            }
+-            arc.Image.sprite = sprite;
++            else arc = sprites ? CreateSpriteArc() : CreateImageArc();
++            if (arc.Image != null) arc.Image.sprite = sprite;
++            if (arc.Sprite != null) arc.Sprite.sprite = sprite;
+             arc.Start = time;
+             arc.Big = big;
+             arc.StartDx = startDx; arc.StartDy = startDy;
+@@ -54,9 +50,57 @@ public void Spawn(Sprite sprite, bool big, double time, double startDx = 0, doub
+             Place(arc, 0);
+         }
+ 
++        bool UseSprites() => SettingManager.Instance != null
++            && SettingManager.Instance.Settings.display.FlyingNoteDraw == DisplaySettings.FlyingSprite;
++
++        Arc CreateImageArc()
++        {
++            var root = new GameObject("NoteArc", typeof(RectTransform)).GetComponent<RectTransform>();
++            root.SetParent(transform, false);
++            root.anchorMin = root.anchorMax = new Vector2(0, 1);
++            root.pivot = new Vector2(0.5f, 0.5f);
++            root.sizeDelta = new Vector2(NoteSize, NoteSize);
++            var image = root.gameObject.AddComponent<UnityEngine.UI.Image>();
++            image.raycastTarget = false;
++            return new Arc { Root = root, Image = image };
++        }
++
++        // Sprites live on a transform with no CanvasRenderer, so moving them does not rebuild the UI.
++        Arc CreateSpriteArc()
++        {
++            var root = new GameObject("NoteArcSprite", typeof(RectTransform)).GetComponent<RectTransform>();
++            root.SetParent(transform, false);
++            root.anchorMin = root.anchorMax = new Vector2(0, 1);
++            root.pivot = new Vector2(0.5f, 0.5f);
++            root.sizeDelta = new Vector2(NoteSize, NoteSize);
++            var sprite = root.gameObject.AddComponent<LaneSprite>();
++            // Share the lane's material. A new SortingGroup keeps these notes above the lane
++            // without joining the interface canvas that redraws every moving image.
++            var layer = SpriteLayer();
++            sprite.Initialize(layer, null, 40);
++            var group = root.gameObject.AddComponent<UnityEngine.Rendering.SortingGroup>();
++            group.sortingOrder = 40;
++            return new Arc { Root = root, Sprite = sprite };
++        }
++
++        LaneSpriteLayer SpriteLayer()
++        {
++            if (spriteLayer != null) return spriteLayer;
++            var host = new GameObject("FlyingNoteSprites");
++            host.transform.SetParent(transform, false);
++            spriteLayer = host.AddComponent<LaneSpriteLayer>();
++            var laneLayer = lane != null ? lane.GetComponentInChildren<LaneSpriteLayer>() : null;
++            if (laneLayer != null) spriteLayer.sourceMaterial = laneLayer.sourceMaterial;
++            return spriteLayer;
++        }
++
+         public void ResetDisplay()
+         {
+-            foreach (var arc in active) { arc.Root.gameObject.SetActive(false); pool.Add(arc); }
++            foreach (var arc in active)
++            {
++                arc.Root.gameObject.SetActive(false);
++                (arc.UsesSprite ? spritePool : imagePool).Add(arc);
++            }
+             active.Clear();
+             if (gaugeHitEffect != null) gaugeHitEffect.ResetDisplay();
+         }
+@@ -69,8 +113,10 @@ public void ShowTime(double time)
+                 double elapsed = time - arc.Start;
+                 if (!NoteArcPath.IsFinished(elapsed)) { Place(arc, NoteArcPath.Progress(elapsed)); continue; }
+                 arc.Root.gameObject.SetActive(false);
+-                pool.Add(arc); active.RemoveAt(i--);
+-                if (gaugeHitEffect != null) gaugeHitEffect.Play(arc.Image.sprite, arc.Big, arc.Start + NoteArcPath.Duration);
++                Sprite finished = arc.Image != null ? arc.Image.sprite : arc.Sprite.sprite;
++                (arc.UsesSprite ? spritePool : imagePool).Add(arc);
++                active.RemoveAt(i--);
++                if (gaugeHitEffect != null) gaugeHitEffect.Play(finished, arc.Big, arc.Start + NoteArcPath.Duration);
+             }
+             if (gaugeHitEffect != null) gaugeHitEffect.ShowTime(time);
+         }
+diff --git a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
+index 0da01ac..1e68d0b 100644
+--- a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
++++ b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
+@@ -396,6 +396,8 @@ void SpawnArc(int index, Judgment result)
+         {
+             if (Views.noteArcs == null) return;
+             var note = Session.Chart.Notes[index];
++            var display = SettingManager.Instance != null ? SettingManager.Instance.Settings.display : null;
++            if (display != null && !display.Flies(result == Judgment.Roll && note.IsDrumroll)) return;
+             NoteKind kind;
+             if ((result == Judgment.Good || result == Judgment.Ok) && note.IsAdLib) kind = hitKa && !AutoPlay ? NoteKind.Ka : NoteKind.Don;
+             else if (result == Judgment.Good || result == Judgment.Ok) kind = note.Kind;
+diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+index fc5b0b7..c0ac0ce 100644
+--- a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
++++ b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+@@ -248,6 +248,15 @@ public static IReadOnlyList<SettingPage> Pages(SoundPlatform platform) => new[]
+                     SettingRow.Number("lane-opacity", T("display.laneOpacity"), T("display.laneOpacityDesc"),
+                         DisplaySettings.MovieLaneOpacityDefault, DisplaySettings.MovieLaneOpacityStep,
+                         s => s.display.movieLaneOpacity, (s, v) => s.display.movieLaneOpacity = v, v => v + "%", 0, 100, slider: true, stepText: DisplaySettings.MovieLaneOpacityStep + "%")),
++                new SettingGroup("Flying Notes",
++                    SettingRow.Choice("flying-notes", "Flying Notes",
++                        "Images draws each flying note as an interface image. Sprites uses the same drawing as the notes on the lane, still one note for every hit.",
++                        new[] { "Images", "Sprite" },
++                        s => s.display.FlyingNoteDraw, (s, i) => s.display.flyingNoteDraw = i),
++                    SettingRow.Choice("flying-amount", "Flying Amount",
++                        "High: every hit flies. Medium: normal notes fly, drumroll hits do not. Low: nothing flies.",
++                        new[] { "High", "Medium", "Low" },
++                        s => s.display.FlyingAmount, (s, i) => s.display.flyingAmount = i)),
+             }),
+             new SettingPage("sound", () => T("sound.title"), () => T("sound.subtitle"), s => Sound(platform, s.audio.Backend), audioOutput: true),
+             new SettingPage("accounts", () => T("accounts.title"), () => T("accounts.subtitle"), _ => new[]
+diff --git a/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs
+new file mode 100644
+index 0000000..7482c21
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs
+@@ -0,0 +1,42 @@
++using NUnit.Framework;
++
++namespace OurTaiko.Tests
++{
++    public sealed class FlyingNoteDrawTests
++    {
++        [Test]
++        public void MissingAndUnknownValuesStayOnTheCurrentDrawing()
++        {
++            Assert.That(new GameSettings().display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingCurrent));
++            Assert.That(GameSettings.FromJson("{}").display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingCurrent));
++            Assert.That(GameSettings.FromJson("{\"display\":{\"flyingNoteDraw\":9}}").display.FlyingNoteDraw,
++                Is.EqualTo(DisplaySettings.FlyingCurrent));
++        }
++
++        [Test]
++        public void FlyingAmountDefaultsToHighAndMediumSkipsDrumrollsOnly()
++        {
++            var display = new DisplaySettings();
++            Assert.That(display.FlyingAmount, Is.EqualTo(DisplaySettings.FlyingHigh));
++            Assert.That(display.Flies(false) && display.Flies(true), Is.True);
++            Assert.That(GameSettings.FromJson("{\"display\":{\"flyingAmount\":9}}").display.FlyingAmount,
++                Is.EqualTo(DisplaySettings.FlyingHigh));
++            display.flyingAmount = DisplaySettings.FlyingMedium;
++            Assert.That(display.Flies(false), Is.True);
++            Assert.That(display.Flies(true), Is.False);
++            display.flyingAmount = DisplaySettings.FlyingLow;
++            Assert.That(display.Flies(false) || display.Flies(true), Is.False);
++        }
++
++        [Test]
++        public void TheChosenDrawingAndAmountSurviveJson()
++        {
++            var settings = new GameSettings();
++            settings.display.flyingNoteDraw = DisplaySettings.FlyingSprite;
++            settings.display.flyingAmount = DisplaySettings.FlyingLow;
++            var loaded = GameSettings.FromJson(settings.ToJson());
++            Assert.That(loaded.display.FlyingNoteDraw, Is.EqualTo(DisplaySettings.FlyingSprite));
++            Assert.That(loaded.display.FlyingAmount, Is.EqualTo(DisplaySettings.FlyingLow));
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta
+new file mode 100644
+index 0000000..6f35e60
+--- /dev/null
++++ b/Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 7b2bc9e7f2d84f0b9e2b5c6a1d3f4e8a

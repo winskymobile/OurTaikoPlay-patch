@@ -1,0 +1,76 @@
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
+index c80cd6b..7004a67 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
+@@ -20,12 +20,19 @@ internal void PlaySearchSound(Sound sound)
+         public int SearchCount => searchSongs.Count;
+         public event Action WheelRebuilt;
+         public event Action SearchRequested;
+-        public string SearchFolderTitle => L10n.Get("Menu", "select.searchTitle");
+-        public string SearchFolderDescription => L10n.Get("Menu", "select.searchDescription");
++        public string SearchFolderTitle => Words("Search / Sort", "検索・並べ替え", "搜索／排序", "搜尋／排序");
++        public string SearchFolderDescription => Words("Keyword · Difficulty · Stars · FC / AP", "Keyword・むずかしさ・★・FC / AP", "Keyword · 难度 · 星级 · FC / AP", "Keyword · 難度 · 星級 · FC / AP");
+         // The source folder (its key) the search covers, null for every source; set by the search
+         // board that opened the dialog and kept while the results show.
+         public string SearchScope { get; private set; }
+         string searchScopeTitle, searchHomeKey;
++        static string Words(string en, string ja, string zh, string zhTw = null)
++        {
++            string language = UiText.InGameLanguage(SettingManager.Instance?.Settings.general.Language ?? "en");
++            if (language == "zh") return zh;
++            if (language == "zh_tw") return string.IsNullOrEmpty(zhTw) ? ja : zhTw;
++            return string.IsNullOrEmpty(ja) ? en : ja;
++        }
+         static WheelItem NewSearchItem() => new WheelItem { Kind = ItemKind.Search };
+ 
+         // A search board names the source it searches, if it is not every source.
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+index 823c0bd..496bbb7 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+@@ -105,7 +105,7 @@ void BindFolder(Board board, FolderSlot slot)
+             item.panelClosed.Alpha(1);
+             item.panelOpen.enabled = false;
+             item.charaLeft.enabled = item.charaRight.enabled = false;
+-            item.title.text = back ? SongSelectManager.BackLabel : search ? Manager.SearchFolderTitle : folder.Title;
++            item.title.text = back ? UiText.InGame(SongSelectManager.BackLabel) : search ? Manager.SearchFolderTitle : folder.Title;
+             item.title.Squeeze(860);
+             item.count.text = back ? "" : search ? Manager.SearchDescription(board.Item) : L10n.Format("Menu", "select.folderSongs", folder.SongCount, folder.ServerName);
+             if (!back)
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+index d9a51a1..3be2fe2 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+@@ -205,6 +205,17 @@ void Awake()
+             coursePanel.gameObject.SetActive(false);
+             DrawOverlays(0);
+             if (view.search != null) view.search.Bind(Manager);
++            // Authored Japanese labels outside the song boards: the best-score caption and the 2P invite.
++            if (view.bestScore != null)
++            {
++                var caption = view.bestScore.transform.Find("Caption");
++                if (caption != null && caption.TryGetComponent<TMP_Text>(out var label)) label.text = UiText.InGame(label.text);
++            }
++            if (view.overlays != null)
++            {
++                if (view.overlays.invitePlayer != null) view.overlays.invitePlayer.text = UiText.InGame(view.overlays.invitePlayer.text);
++                if (view.overlays.inviteMessage != null) view.overlays.inviteMessage.text = UiText.InGame(view.overlays.inviteMessage.text);
++            }
+         }
+ 
+         void Start()
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
+index 1bba7eb..3b45836 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
+@@ -49,8 +49,9 @@ public sealed class CourseCardView
+         public void ShowPlayMode(bool practice)
+         {
+             if (!practice) return;
+-            ModeLabel = CoinOverlayView.Text(overlays.transform, "PracticeMode", L10n.Get("Menu", "select.practiceMode"));
++            ModeLabel = CoinOverlayView.Text(overlays.transform, "PracticeMode", UiText.InGame("練習モード"));
+             ModeLabel.rectTransform.Center(960, 48);
++            InGameFont.Use(ModeLabel);
+         }
+     }
+ }

@@ -3,24 +3,31 @@
 给已安装的 **OurTaikoPlay.app**（Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打补丁，
 **不需要 Unity 编辑器**。补丁按模块拆分，可以只装数据目录、只装译文，或加装飞出音符。
 
-## 1.0.1-507
+## 1.0.1-511
 
-当前基线是 `patches/1.0.1-507/`，对应上游提交 `a5c3501`。模块清单和依赖写在
-`patches/1.0.1-507/manifest.txt`，补丁文件本身也都是独立的 git patch。
+当前基线是 `patches/1.0.1-511/`，对应上游提交 `fbcaaf1`。模块清单和依赖写在
+`patches/1.0.1-511/manifest.txt`，补丁文件本身也都是独立的 git patch。
 
 - 韩文已经从 `UiText` 译文表移除；保留日文、简体、繁体三列。
 - 设置页语言行仍按上游提供英 / 日 / 简；繁体译文表保留给已有 `zh_tw` 设置和结算测试。
 - 简繁字体、结算切图、段位切图仍然嵌入 `OurTaiko.Runtime.dll`。
 - 飞出音符是可选模块；不加它时，显示页只有上游的背景影片设置。
+- 509–511 的在线入口改为 `net.ourtaiko.org` 单点登录与整站加载；入口与在线文字模块已按新结构重放。
 
-旧版存档仍在仓库根目录：`play-preferences-1.0.1-505.patch`、`play-preferences-1.0.1-480.patch`、
-`play-preferences.patch`（467 及以前）。
+旧版存档仍在仓库根目录：`play-preferences-1.0.1-507.patch`、`play-preferences-1.0.1-505.patch`、
+`play-preferences-1.0.1-480.patch`、`play-preferences.patch`（467 及以前）。
 
 ## 快速使用
 
 ```bash
 # 看当前 app 版本可用的模块
 tools/patch-app.sh --list
+
+# 看当前装的是原版还是补丁
+tools/patch-app.sh --status
+
+# 还原当前版本的原版 DLL
+tools/patch-app.sh --restore
 
 # 交互选择：列出 1 / 2 / 3，输入序号，可多选；回车等于 1,2
 tools/patch-app.sh
@@ -48,7 +55,7 @@ tools/patch-app.sh --preset core --with flying-notes
 tools/patch-app.sh --preset core --without result-page
 
 # 手工解决冲突后，直接编译当前源码树
-tools/patch-app.sh --source tools/build/source-1.0.1-507 --from-tree
+tools/patch-app.sh --source tools/build/source-1.0.1-511 --from-tree
 
 # 只编译和检查，不安装
 tools/patch-app.sh --preset full --no-install
@@ -106,10 +113,43 @@ tools/patch-app.sh --with flying-notes
 - 只选 `data-only` 时没有 `UiText.cs`，译文闸门会跳过；结算 / 段位的切图脚本只在
   对应模块存在时运行，字体只在 `interface-language` 存在时嵌入。
 
+## 安装状态与还原
+
+脚本不往 app 里写标记文件，判断依据是 DLL 哈希：
+
+```bash
+tools/patch-app.sh --status
+```
+
+- `state original`：当前 DLL 与 `backup/OurTaiko.Runtime.<版本>.original.dll` 一致，没有补丁。
+- `state patched`：DLL 与当前版本原版不同，说明已经打过补丁（或换过 DLL）。
+- `state unknown`：缺少该版本的原版备份，无法判断。
+
+还原：
+
+```bash
+tools/patch-app.sh --restore          # 交互确认
+tools/patch-app.sh --restore --yes    # 不询问
+
+# 等价的手工入口
+tools/restore.sh
+```
+
+规则：
+
+- 只还原 `backup/OurTaiko.Runtime.<当前 app 版本>.original.dll`，不会把别的版本的 DLL 复制进来。
+- 还原前把当前 DLL 另存为 `backup/OurTaiko.Runtime.pre-<时间戳>.dll`，所以打错了还能再换回去。
+- 会先退出游戏；还原后默认不启动。
+- 只还原 DLL。`~/Library/Application Support/OurTaiko/OurTaikoPlay/` 里的数据、`settings.json`
+  以及已迁移的 `Songs/` 不会回滚，原有存档保留。
+
+重新打补丁不需要先还原：`patch-app.sh` 每次都从 `manifest.txt` 的 `base` 重新应用模块并编译，
+不会在已打补丁的 DLL 上叠加。
+
 ## 目录
 
 ```
-patches/1.0.1-507/                        507 的模块补丁与清单
+patches/1.0.1-511/                        511 的模块补丁与清单
   manifest.txt                            基线、预设、模块依赖
   01-macos-data-root.patch                macOS 数据目录
   02-interface-language.patch             界面译文核心
@@ -119,7 +159,8 @@ patches/1.0.1-507/                        507 的模块补丁与清单
   06-result-page.patch                    结算页文字与切图
   07-dan-page.patch                       段位页文字与切图
   08-flying-notes.patch                   飞出音符（可选）
-play-preferences-1.0.1-507.patch          507 的合并补丁（手工重放时用）
+play-preferences-1.0.1-511.patch          511 的合并补丁（手工重放时用）
+play-preferences-1.0.1-507.patch          507 的合并补丁（存档）
 play-preferences-1.0.1-505.patch          505 存档
 play-preferences-1.0.1-480.patch          480 存档
 play-preferences.patch                    旧基线补丁（467 及以前）
@@ -146,10 +187,10 @@ backup/                                   原版 DLL 与设置备份（不进仓
 tools/save-original.sh
 
 # 1) 编译
-tools/build-runtime-dll.sh tools/build/source-1.0.1-507 /Applications/OurTaikoPlay.app tools/build/1.0.1-507
+tools/build-runtime-dll.sh tools/build/source-1.0.1-511 /Applications/OurTaikoPlay.app tools/build/1.0.1-511
 
 # 2) 安装
-tools/install.sh tools/build/1.0.1-507/OurTaiko.Runtime.dll
+tools/install.sh tools/build/1.0.1-511/OurTaiko.Runtime.dll
 ```
 
 安装前会检查 `backup/OurTaiko.Runtime.<版本>.original.dll` 的字段布局；布局不一致会直接
@@ -164,15 +205,15 @@ tools/patch-app.sh --list
 tools/patch-app.sh --preset core --launch
 ```
 
-如果 app 版本还没有对应目录，先从上游建立新的 `patches/<版本>/`。当前 507 的流程是：
+如果 app 版本还没有对应目录，先从上游建立新的 `patches/<版本>/`。当前 511 的流程是：
 
 ```bash
-cd tools/build/source-1.0.1-507
+cd tools/build/source-1.0.1-511
 git fetch upstream
-git checkout -B play-preferences a5c3501
+git checkout -B play-preferences fbcaaf1
 
 # 逐个应用模块，或直接用合并补丁
-git apply --3way ../../../play-preferences-1.0.1-507.patch
+git apply --3way ../../../play-preferences-1.0.1-511.patch
 ```
 
 更推荐直接用脚本：它按 manifest 顺序逐个应用，自动补依赖，并在安装前跑布局与译文闸门。
@@ -184,8 +225,8 @@ tools/patch-app.sh --preset full --no-install
 ## 自检
 
 ```bash
-tools/check-layout.sh backup/OurTaiko.Runtime.1.0.1-507.original.dll tools/build/1.0.1-507/OurTaiko.Runtime.dll
-python3 tools/check-translations.py tools/build/source-1.0.1-507
+tools/check-layout.sh backup/OurTaiko.Runtime.1.0.1-511.original.dll tools/build/1.0.1-511/OurTaiko.Runtime.dll
+python3 tools/check-translations.py tools/build/source-1.0.1-511
 ```
 
 `check-layout.sh` 必须输出 `MonoBehaviour layout breaks: 0`，`check-translations.py` 必须输出

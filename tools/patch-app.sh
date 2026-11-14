@@ -4,7 +4,8 @@
 #   patch-app.sh [--app <bundle>] [--source <tree>] [--patchset <dir>]
 #                [--feature <1,2,3>] [--preset <name>] [--with <ids>] [--without <ids>]
 #                [--patch <file>] [--upstream <ref>] [--launch]
-#                [--from-tree] [--no-fetch] [--no-install] [--list] [--yes]
+#                [--from-tree] [--no-fetch] [--no-install] [--list]
+#                [--status] [--restore] [--yes]
 #
 # Patch sets live in patches/<app version>/manifest.txt. Each module is a normal
 # git patch cut against the manifest's base commit, and modules are applied in
@@ -17,6 +18,8 @@
 #   --without     remove modules after dependencies are resolved
 #   --patch       legacy single-patch mode (the old play-preferences-*.patch flow)
 #   --from-tree   use the source tree as-is (after resolving conflicts by hand)
+#   --status      show the app version and whether its DLL is original or patched
+#   --restore     put back the saved original DLL for this app version
 #
 # With no selector, an interactive terminal asks for feature numbers (for example
 # 1,3). Pressing Enter picks 1,2. A non-interactive run defaults to core.
@@ -43,6 +46,8 @@ FROM_TREE=0
 DO_FETCH=1
 DO_INSTALL=1
 DO_LIST=0
+DO_STATUS=0
+DO_RESTORE=0
 ASSUME_YES=0
 
 say() { printf '%s\n' "$*"; }
@@ -67,6 +72,8 @@ while [ $# -gt 0 ]; do
     --no-fetch) DO_FETCH=0; shift ;;
     --no-install) DO_INSTALL=0; shift ;;
     --list) DO_LIST=1; shift ;;
+    --status) DO_STATUS=1; shift ;;
+    --restore) DO_RESTORE=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
@@ -110,6 +117,79 @@ DLL="$APP/Contents/Resources/Data/Managed/OurTaiko.Runtime.dll"
 VERSION=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo unknown)
 say "app       $APP ($VERSION)"
 BRANCH="play-preferences-$VERSION"
+
+# --------------------------------------------------------- status / restore
+ORIG="$ROOT/backup/OurTaiko.Runtime.$VERSION.original.dll"
+hash_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+
+print_status() {
+  local have orig_hash patched=0
+  have=$(hash_of "$DLL")
+  say "dll       $DLL"
+  say "sha256    $have"
+  if [ ! -f "$ORIG" ]; then
+    say "original  missing (no backup/OurTaiko.Runtime.$VERSION.original.dll)"
+    say "state     unknown"
+  else
+    orig_hash=$(hash_of "$ORIG")
+    say "original  $ORIG"
+    say "          $orig_hash"
+    if [ "$have" = "$orig_hash" ]; then
+      say "state     original (no patch installed)"
+    else
+      say "state     patched (differs from the original)"
+      patched=1
+    fi
+  fi
+  local built="$ROOT/tools/build/$VERSION/OurTaiko.Runtime.dll"
+  if [ -f "$built" ] && [ "$have" = "$(hash_of "$built")" ]; then
+    say "build     matches tools/build/$VERSION/OurTaiko.Runtime.dll"
+  fi
+  if [ -f "$ROOT/patches/$VERSION/manifest.txt" ]; then
+    say "patches   $ROOT/patches/$VERSION"
+  fi
+  say ""
+  if [ "$patched" = 1 ]; then
+    say "restore   tools/patch-app.sh --restore"
+  fi
+}
+
+restore_original() {
+  [ -f "$ORIG" ] || die "no saved original for $VERSION at $ORIG"
+  if cmp -s "$ORIG" "$DLL"; then
+    say "already original; nothing to restore"
+    exit 0
+  fi
+  say "restore   $ORIG"
+  if [ "$ASSUME_YES" = 0 ]; then
+    [ -t 0 ] || die "pass --yes to restore without a prompt"
+    printf 'Replace the installed %s DLL with the original? [y/N] ' "$VERSION"
+    read -r answer
+    case "$answer" in y|Y|yes|YES) ;; *) die "cancelled" ;; esac
+  fi
+  local was_open=0
+  pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1 && was_open=1
+  osascript -e 'quit app "OurTaikoPlay"' >/dev/null 2>&1 || true
+  sleep 2
+  cp -p "$DLL" "$ROOT/backup/OurTaiko.Runtime.pre-$(date +%Y%m%d-%H%M%S).dll"
+  cp "$ORIG" "$DLL"
+  say "restored  original $VERSION"
+  hash_of "$DLL"
+  if [ "$was_open" = 1 ] && pgrep -f "$APP/Contents/MacOS" >/dev/null 2>&1; then
+    say "note: the game was open and did not close; the original applies next launch"
+  else
+    say "app stays closed (pass --launch with the patch command to open it)"
+  fi
+  exit 0
+}
+
+if [ "$DO_STATUS" = 1 ]; then
+  print_status
+  exit 0
+fi
+if [ "$DO_RESTORE" = 1 ]; then
+  restore_original
+fi
 
 # Prefer the version worktree over a checkout that is on another branch or has
 # uncommitted edits. An explicit --source always wins.
@@ -337,7 +417,6 @@ fi
 
 # ------------------------------------------------------------------- backup
 step "keep the shipped DLL"
-ORIG="$ROOT/backup/OurTaiko.Runtime.$VERSION.original.dll"
 if [ -f "$ORIG" ]; then
   say "already kept $ORIG"
 else

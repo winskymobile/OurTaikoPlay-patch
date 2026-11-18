@@ -1,0 +1,258 @@
+# 1.0.2-553 补丁集
+
+- 目标 app：OurTaikoPlay `1.0.2-553`
+- 基线提交：上游 `c1982e5605cc79c81e86bc57ba7c0809e8819f4f`
+- 工作树：`tools/build/source-1.0.2-553`（分支 `play-preferences-1.0.2-553`）
+- 模块清单：`manifest.txt`
+- 合并补丁：仓库根目录 `play-preferences-1.0.2-553.patch`
+
+基线是上游 `c1982e5`；模块按 `manifest.txt` 顺序应用，每个补丁以前一模块的结果为前置。
+
+553 是 1.0.2 后续构建，基于 531 加入的多人游戏、区域资源路由、Linux 音频输出等上游改动完成适配；设置页保留 Linux 独占输出设备信息。九个补丁模块均已重放并通过构建。
+在线入口仍是 `net.ourtaiko.org` 单点登录与整站加载，进度行的服务器计数沿用
+`done + i + 1` 语义。新增界面里未经译文模块覆盖的英文 / 日文由上游 `L10n` 表提供。
+模块只依赖 `interface-language`，可以单独选、组合选，或者跳过任何文字模块。
+
+## 数据目录
+
+`macos-data-root` 把 macOS 正式版的数据根从 `.app` 内部迁到：
+
+```
+~/Library/Application Support/OurTaiko/OurTaikoPlay/
+├── Songs/                 谱面与歌曲文件
+├── cache/                 缓存
+├── settings.json          设置
+├── options.json           选项
+├── player.json            玩家名牌
+├── servers.json           服务器列表
+└── scores.sqlite3         本地成绩与待上传队列
+```
+
+首次启动时的迁移规则：
+
+- 只处理上面列出的 5 个文件和 2 个目录，不会把 `.app` 里的 `Contents`、可执行文件等一起搬走。
+- 目标文件已存在且非空时跳过；目标目录已存在且非空时整个目录跳过。
+- 空的 `Songs/` 视为未迁移，下次启动会再补。
+- 只复制，不删除 `.app` 内的旧文件；确认新目录正常后可自行清理旧文件。
+- Windows / Linux 仍保持“可执行文件旁边”；iOS / Android / Editor 仍用 `Application.persistentDataPath`。
+
+`tools/install.sh` 在安装后还会合并设置：玩家的 `settings.json` 优先，只补入新版本新增、
+玩家文件里还没有的键，并在合并前写 `settings.json.bak-<时间戳>`。
+
+## 模块与文件
+
+| id | 内容 | 依赖 |
+| --- | --- | --- |
+| `macos-data-root` | macOS 数据根、首次迁移、路径测试 | 无 |
+| `interface-language` | `UiText` 译文表、设置页语言行、游戏内简繁字体 | 无 |
+| `entry-online-text` | 入口看板、账号、登录状态、在线文字 | `interface-language` |
+| `play-text` | 演奏、暂停、练习、选项板、加载文字 | `interface-language` |
+| `song-select-text` | 选曲界面文字 | `interface-language` |
+| `result-page` | 结算页文字、难度 / 判定 / 成绩 / 通关简繁切图 | `interface-language` |
+| `dan-page` | 段位道场文字、合格条件、确认框简繁切图 | `interface-language` |
+| `flying-notes` | 显示设置里的飞出音符绘制方式与数量 | `interface-language` |
+| `bpm-readout` | BPM 小字：曲目列表每张歌曲板右下角、难度选择页、演奏 HUD 右下角 | `interface-language` |
+
+### 01 `macos-data-root`
+
+```
+Assets/OurTaiko/Runtime/Core/GamePaths.cs
+Assets/OurTaiko/Runtime/Core/MacPlayerData.cs (+ .meta)
+Assets/OurTaiko/Tests/EditMode/GamePathsTests.cs (+ .meta)
+Assets/OurTaiko/Tests/EditMode/MacPlayerDataTests.cs (+ .meta)
+```
+
+### 02 `interface-language`
+
+```
+Assets/OurTaiko/Runtime/Core/InGameFont.cs (+ .meta)
+Assets/OurTaiko/Runtime/Core/UiText.cs (+ .meta)
+Assets/OurTaiko/Runtime/Scenes/SettingManager.cs
+Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+Assets/OurTaiko/Runtime/Settings/SettingsNavigator.cs
+Assets/OurTaiko/Runtime/Settings/SettingsOverlay.cs
+Assets/OurTaiko/Runtime/Settings/SettingsOverlayView.cs
+Assets/OurTaiko/Tests/EditMode/UiTextTests.cs (+ .meta)
+Assets/OurTaiko/Tests/PlayMode/SongLanguageFlowTests.cs
+```
+
+译文表只有三列：日文、简体、繁体。韩文列与韩文界面已经移除。
+
+### 03 `entry-online-text`
+
+```
+Assets/OurTaiko/Runtime/Online/OnlineManager.cs
+Assets/OurTaiko/Runtime/Scenes/EntryScene.cs
+Assets/OurTaiko/Runtime/Scenes/PresentedScene.cs
+```
+
+### 04 `play-text`
+
+```
+Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
+Assets/OurTaiko/Runtime/Play/PlayScene.cs
+Assets/OurTaiko/Runtime/Play/PracticeView.cs
+Assets/OurTaiko/Runtime/Scenes/OptionPanel.cs
+Assets/OurTaiko/Runtime/Scenes/SongLoadingScene.cs
+```
+
+### 05 `song-select-text`
+
+```
+Assets/OurTaiko/Runtime/Scenes/SongSelectManager.Search.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectView.cs
+```
+
+### 06 `result-page`
+
+```
+Assets/OurTaiko/Runtime/Scenes/ResultAnalysisView.cs
+Assets/OurTaiko/Runtime/Scenes/ResultArt.cs (+ .meta)
+Assets/OurTaiko/Runtime/Scenes/ResultBoard.cs
+Assets/OurTaiko/Runtime/Scenes/ResultScene.cs
+Assets/OurTaiko/Tests/PlayMode/ResultLanguageFlowTests.cs (+ .meta)
+```
+
+切图在构建时由 `tools/make-result-art.py` 生成并嵌入 DLL，不向 `.app` 写额外文件。
+
+### 07 `dan-page`
+
+```
+Assets/OurTaiko/Runtime/Play/DanPlayScene.cs
+Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs
+Assets/OurTaiko/Runtime/Scenes/DanResultScene.cs
+Assets/OurTaiko/Runtime/Scenes/DanSelectScene.cs
+Assets/OurTaiko/Runtime/Scenes/DanSelectWidgets.cs
+```
+
+段位切图由 `tools/make-dan-exam-art.py` 生成并嵌入 DLL。
+
+### 08 `flying-notes`（可选）
+
+```
+Assets/OurTaiko/Runtime/Core/GameSettings.cs
+Assets/OurTaiko/Runtime/Core/UiText.cs
+Assets/OurTaiko/Runtime/Play/LaneSprite.cs
+Assets/OurTaiko/Runtime/Play/LaneSpriteLayer.cs
+Assets/OurTaiko/Runtime/Play/NoteArcView.cs
+Assets/OurTaiko/Runtime/Play/PlayerLane.cs
+Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs (+ .meta)
+```
+
+显示设置新增两项：
+
+- 飞出音符绘制方式：图片 / 精灵
+- 飞出数量：高 / 中 / 低
+
+不选这个模块时，显示页只有上游原有的背景影片设置。
+
+### 09 `bpm-readout`
+
+```
+Assets/OurTaiko/Runtime/Core/GameSettings.cs
+Assets/OurTaiko/Runtime/Core/UiText.cs
+Assets/OurTaiko/Runtime/Play/PlayScene.cs
+Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs (+ .meta)
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+```
+
+谱面 BPM 以小字显示在三处，全部在运行时生成，不改场景和 prefab：
+
+- 选曲：列表里每张歌曲板都在自己的右下角显示；选中的那张随板面展开，数字仍在右下角；
+- 难度选择：标题与副标题右侧，`BPM` 与难度卡片同一屏；
+- 演奏：1920×1080 画面的右下角，底部页脚上方；演奏中随变速谱面更新。
+
+显示设置新增 `BPM` 分组，开关 `Show BPM`（默认开），保存在
+`settings.json` 的 `display.showBpm`。关闭后三处同时隐藏。
+
+## 预设
+
+- `core`：除 `flying-notes` 外的全部模块（含 `bpm-readout`）
+- `full`：全部 9 个模块
+- `data-only`：只装 `macos-data-root`
+- `language-only`：只装 `interface-language`
+
+## 功能序号
+
+交互运行时直接列出下面三项，输入序号可多选（例如 `1,3`）；直接回车等于 `1,2`。
+
+| 序号 | 功能 | 展开的模块 |
+| --- | --- | --- |
+| 1 | 数据目录迁移 | `macos-data-root` |
+| 2 | 界面与游戏内文字（含 BPM 读数） | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page`、`bpm-readout` |
+| 3 | 飞出音符 | `flying-notes`（自动补 `interface-language`） |
+
+也可以非交互指定：
+
+```bash
+tools/patch-app.sh --feature 1,2
+tools/patch-app.sh --feature 3
+tools/patch-app.sh --feature all
+```
+
+## 命令
+
+```bash
+cd /Users/vincent/Documents/开发/OurTaikoPlay-patch
+
+# 列出 553 的功能序号、预设和模块
+tools/patch-app.sh --list
+
+# 按功能序号选择（可多选）
+tools/patch-app.sh --feature 1,2 --no-install
+
+# 只编译检查，不安装
+tools/patch-app.sh --preset full --no-install --no-fetch
+
+# 只迁移数据目录
+tools/patch-app.sh --preset data-only --no-install
+
+# 只要界面译文核心
+tools/patch-app.sh --preset language-only --no-install
+
+# core 去掉结算页
+tools/patch-app.sh --preset core --without result-page --no-install
+
+# 只加飞出音符；脚本会自动补 interface-language
+tools/patch-app.sh --with flying-notes --no-install
+
+# 手工解决冲突后，直接编译当前源码树
+tools/patch-app.sh --source tools/build/source-1.0.2-553 \
+  --from-tree --no-install --no-fetch
+```
+
+不传 `--source` 时，脚本优先使用 `tools/build/source-<app 版本>`；该目录不存在或
+不可用时才回退到 `../OurTaikoPlay`。
+
+## 验证
+
+全量模块的预期闸门：
+
+```
+MonoBehaviour layout breaks: 0
+460 rows, 84 keys used by the runtime
+translations OK
+```
+
+`data-only` 没有 `UiText.cs`，脚本会输出
+`translations skipped (interface-language not selected)`；`language-only` 或去掉某个
+文字模块时，未被选中的模块里的占位符键会以 `note:` 形式提示，不算失败。
+
+## 上游更新
+
+1. 用新 app 的 `CFBundleShortVersionString` 建 `patches/<版本>/`。
+2. 在对应上游提交上开工作树，逐个重放 `manifest.txt` 里的模块。
+3. 更新 `base`、模块文件、预设与依赖。
+4. 重新生成合并补丁：
+
+   ```bash
+   git -C tools/build/source-<版本> diff <base> HEAD > play-preferences-<版本>.patch
+   ```
+
+5. 用 `--preset full --no-install` 和最少模块组合各跑一遍布局 / 译文闸门。

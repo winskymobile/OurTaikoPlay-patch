@@ -81,7 +81,7 @@ index d1128ec..35c77be 100644
          static bool Writable(string directory)
          {
 diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
-index 6f657a3..77918d9 100644
+index 6f657a3..175d04a 100644
 --- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
 +++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
 @@ -28,6 +28,8 @@ public static GameSettings FromJson(string json)
@@ -111,6 +111,17 @@ index 6f657a3..77918d9 100644
          // Applies these settings to the running player; render every frame (no frame skipping).
          public void Apply()
          {
+@@ -191,5 +202,10 @@ public int TargetFrameRate
+                 return targetFrameRate;
+             }
+         }
++
++        // Show the chart's BPM as a small number: on the selected song board, on the course panel
++        // while a difficulty is chosen, and in the play HUD.
++        public bool showBpm = true;
++        public bool ShowBpm => showBpm;
+     }
+ }
 diff --git a/Assets/OurTaiko/Runtime/Core/InGameFont.cs b/Assets/OurTaiko/Runtime/Core/InGameFont.cs
 new file mode 100644
 index 0000000..907322e
@@ -365,10 +376,10 @@ index 0000000..79a53e5
 \ No newline at end of file
 diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
 new file mode 100644
-index 0000000..165492f
+index 0000000..a14e6e9
 --- /dev/null
 +++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
-@@ -0,0 +1,665 @@
+@@ -0,0 +1,670 @@
 +using System.Collections.Generic;
 +using TMPro;
 +using UnityEngine;
@@ -416,6 +427,11 @@ index 0000000..165492f
 +                Row("ティアリングを防ぐため、フレームごとに画面の更新を待ちます。有効中は目標フレームレートの代わりにリフレッシュレートを使います。",
 +                    "每帧等待显示器刷新，避免画面撕裂。开启后，刷新率会代替目标帧率。",
 +                    "每幀等待顯示器刷新，避免畫面撕裂。開啟後，刷新率會代替目標幀率。"),
++            ["Show BPM"] = Row("BPM を表示", "显示 BPM", "顯示 BPM"),
++            ["Draws the chart's BPM as a small number: on every song board in the list, on the difficulty panel, and at the bottom right while playing."] =
++                Row("譜面の BPM を小さな数字で表示します。曲リストの各曲板、難易度選択、演奏中の右下に出ます。",
++                    "以很小的数字显示谱面 BPM：曲目列表的每张歌曲板、难度选择页和游玩时右下角。",
++                    "以很小的數字顯示譜面 BPM：曲目列表的每張歌曲板、難度選擇頁和遊玩時右下角。"),
 +            ["Background Movie"] = Row("背景動画", "背景影片", "背景影片"),
 +            ["Play the chart's background movie behind the lanes, and download it with online charts."] =
 +                Row("譜面の背景動画をレーンの後ろで再生し、オンライン譜面では一緒にダウンロードします。",
@@ -1339,10 +1355,19 @@ index 28a6f58..5744819 100644
          {
              if (opening != null) { StopCoroutine(opening); opening = null; }
 diff --git a/Assets/OurTaiko/Runtime/Play/PlayScene.cs b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-index b7e55fe..5e9d304 100644
+index b7e55fe..6170b5e 100644
 --- a/Assets/OurTaiko/Runtime/Play/PlayScene.cs
 +++ b/Assets/OurTaiko/Runtime/Play/PlayScene.cs
-@@ -124,6 +124,10 @@ IEnumerator Start()
+@@ -73,6 +73,8 @@ private set
+         internal override bool AcceptsHits => songClock.Started && !switcher.IsInputBlocked && !IsPaused && !IsFinished;
+         internal override float MovieLaneAlpha => movie != null ? movie.LaneAlpha : 1;
+         SongInfo displayInfo;
++        // Small BPM readout in the play HUD's bottom-right; built on the first play.
++        TextMeshProUGUI bpmLabel;
+         // The subtitle line shows the SUBTITLE and, when the chart names one, the MAKER in turn.
+         const float SubtitleRotationSeconds = 4f;
+         string[] subtitleLines = Array.Empty<string>();
+@@ -124,6 +126,10 @@ IEnumerator Start()
              resultRestart.onClick.AddListener(Restart);
              resultBack.onClick.AddListener(Back);
              pausePanel.SetActive(false); resultPanel.SetActive(false);
@@ -1353,7 +1378,15 @@ index b7e55fe..5e9d304 100644
              // Disabled and hidden together: an inactive pad neither draws nor registers with InputManager,
              // and pause/resume only re-enables the pads it disabled itself.
              // The touch drum is a single-player setting; two players use the keyboard. A ghost battle
-@@ -156,7 +160,7 @@ IEnumerator Start()
+@@ -147,6 +153,7 @@ IEnumerator Start()
+                 displayInfo = song.ReadDisplayInfo();
+                 title.text = displayInfo.Title;
+                 ShowSubtitleLines(displayInfo);
++                ShowBpm();
+                 music.SetAudioSong(song);
+                 hitAudio.PrepareAudioEffects(balloonPop, kusudamaPop, adLibHit, mineHit);
+                 // Both seats play one file, so the song's one BGMOVIE plays behind both lanes.
+@@ -156,7 +163,7 @@ IEnumerator Start()
              {
                  Log.Exception("Play", error);
                  IsFinished = true; resultPanel.SetActive(true);
@@ -1362,6 +1395,37 @@ index b7e55fe..5e9d304 100644
              }
              if (IsFinished) yield break;
              AddModeSwitch();
+@@ -209,6 +216,21 @@ void ShowSubtitleLines(SongInfo info)
+             subtitle.text = subtitleLines.Length > 0 ? subtitleLines[0] : "";
+         }
+ 
++        // The chart's BPM in the play HUD's bottom-right. The label follows the subtitle's parent
++        // (the 1920x1080 stage), so no saved scene or prefab changes.
++        void ShowBpm()
++        {
++            if (!BpmReadout.Enabled) { if (bpmLabel != null) bpmLabel.gameObject.SetActive(false); return; }
++            if (bpmLabel == null)
++            {
++                var parent = subtitle != null ? subtitle.transform.parent : transform;
++                // Bottom-right of the stage, above the 96 px footer strip.
++                bpmLabel = BpmReadout.Create(parent, "Bpm", BpmReadout.PlaySize,
++                    new Vector2(1, 0), new Vector2(-40, 118));
++            }
++            BpmReadout.Show(bpmLabel, Session != null ? Session.Chart.Bpm : displayInfo.Bpm, true);
++        }
++
+         // Alternates the subtitle and the maker on a fixed cadence, through pauses too.
+         void RotateSubtitle()
+         {
+@@ -290,6 +312,8 @@ void UpdatePlayVisuals(double time)
+             foreach (var lane in lanes) lane.ShowVisuals(time, time - visualOffset * songClock.Rate, preview, hideSkipped);
+             if (kusudama != null) kusudama.ShowTime(time);
+             SampleDancers(time);
++            // Follows a chart's tempo changes; the label only rebuilds when the number changes.
++            if (bpmLabel != null) BpmReadout.Show(bpmLabel, Session != null ? Session.BpmAt(time) : 0, true);
+         }
+ 
+         // 1P's drum (touch drum, tests); see PlayerLane.Hit.
 diff --git a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs b/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
 index 0da01ac..1e68d0b 100644
 --- a/Assets/OurTaiko/Runtime/Play/PlayerLane.cs
@@ -1419,6 +1483,89 @@ index 5ea28e1..e7c0e43 100644
                      break;
              }
          }
+diff --git a/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs b/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs
+new file mode 100644
+index 0000000..d5f08dc
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs
+@@ -0,0 +1,60 @@
++using System.Globalization;
++using TMPro;
++using UnityEngine;
++
++namespace OurTaiko
++{
++    // A small BPM readout for song select, the course panel and the play HUD. Built at runtime so
++    // no saved layout or serialized field changes: the label is a plain child of the screen it
++    // annotates and is only shown while Settings > Display > Show BPM is on.
++    public static class BpmReadout
++    {
++        public const float SongBoardSize = 26, CourseSize = 28, PlaySize = 30;
++
++        public static bool Enabled =>
++            SettingManager.Instance != null && SettingManager.Instance.Settings.display.ShowBpm;
++
++        // "BPM 180", or one decimal when the chart's tempo is not a whole number.
++        public static string Format(double bpm)
++        {
++            if (double.IsNaN(bpm) || double.IsInfinity(bpm) || bpm <= 0) return "";
++            string number = System.Math.Abs(bpm - System.Math.Round(bpm)) < 0.05
++                ? System.Math.Round(bpm).ToString("0", CultureInfo.InvariantCulture)
++                : bpm.ToString("0.0", CultureInfo.InvariantCulture);
++            return "BPM " + number;
++        }
++
++        // A right-aligned label pinned to one corner of its parent. The anchor makes it follow the
++        // parent when it resizes: an opening song board, the course panel, the play viewport.
++        public static TextMeshProUGUI Create(Transform parent, string name, float size, Vector2 anchor, Vector2 offset)
++        {
++            var label = SkinUi.Text(name, parent, size);
++            var rect = label.rectTransform;
++            rect.anchorMin = rect.anchorMax = anchor;
++            rect.pivot = anchor;
++            rect.sizeDelta = new Vector2(360, size * 1.5f);
++            rect.anchoredPosition = offset;
++            label.alignment = TextAlignmentOptions.BottomRight;
++            label.textWrappingMode = TextWrappingModes.NoWrap;
++            label.overflowMode = TextOverflowModes.Overflow;
++            label.raycastTarget = false;
++            label.color = new Color(1, 1, 1, 0.92f);
++            label.UseUiFont();
++            InGameFont.Use(label);
++            label.text = "";
++            return label;
++        }
++
++        public static void Show(TextMeshProUGUI label, double bpm, bool visible)
++        {
++            if (label == null) return;
++            bool on = visible && Enabled;
++            if (label.gameObject.activeSelf != on) label.gameObject.SetActive(on);
++            if (!on) return;
++            // Only touch the text when the number changes; a per-frame assignment would rebuild
++            // the label's mesh every frame.
++            string text = Format(bpm);
++            if (label.text != text) label.text = text;
++        }
++    }
++}
+diff --git a/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs.meta b/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs.meta
+new file mode 100644
+index 0000000..a9012dc
+--- /dev/null
++++ b/Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs.meta
+@@ -0,0 +1,11 @@
++fileFormatVersion: 2
++guid: 7c4a9e21b6d3487f95a1c0d3e8f2b64a
++MonoImporter:
++  externalObjects: {}
++  serializedVersion: 2
++  defaultReferences: []
++  executionOrder: 0
++  icon: {instanceID: 0}
++  userData:
++  assetBundleName:
++  assetBundleVariant:
 diff --git a/Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs b/Assets/OurTaiko/Runtime/Scenes/DanExamArt.cs
 new file mode 100644
 index 0000000..f1b01a9
@@ -2248,10 +2395,18 @@ index c80cd6b..7004a67 100644
  
          // A search board names the source it searches, if it is not every source.
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
-index 823c0bd..496bbb7 100644
+index 823c0bd..63f0952 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
-@@ -105,7 +105,7 @@ void BindFolder(Board board, FolderSlot slot)
+@@ -87,6 +87,7 @@ void ReleaseView(Board board)
+             }
+             if (board.Slot == null) return;
+             board.Root.gameObject.SetActive(false);
++            if (board.Slot.Bpm != null) board.Slot.Bpm.gameObject.SetActive(false);
+             if (board.Slot.Saved) return;
+             boardPool.Push(board.Slot);
+             board.Slot = null; board.View = null;
+@@ -105,7 +106,7 @@ void BindFolder(Board board, FolderSlot slot)
              item.panelClosed.Alpha(1);
              item.panelOpen.enabled = false;
              item.charaLeft.enabled = item.charaRight.enabled = false;
@@ -2260,11 +2415,72 @@ index 823c0bd..496bbb7 100644
              item.title.Squeeze(860);
              item.count.text = back ? "" : search ? Manager.SearchDescription(board.Item) : L10n.Format("Menu", "select.folderSongs", folder.SongCount, folder.ServerName);
              if (!back)
+diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+index 39c7504..9afa2ee 100644
+--- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
++++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+@@ -85,6 +85,25 @@ void DrawBoard(Board board, bool focused, double now)
+             DrawPlates(board, now);
+             DrawCrown(board, (float)pb, (float)(pb > 0 ? ia : 1));
+             DrawScoreRank(board, (float)pb, (float)(pb > 0 ? ia : 1));
++            // Every board in the list carries its own BPM, small, in its bottom-right corner; the
++            // focused one keeps the same spot on the grown panel.
++            BpmReadout.Show(BoardBpm(board), board.Info.Bpm, true);
++        }
++
++        // The slot's BPM label, built on first use as a child of the board so it moves with it.
++        static TMPro.TextMeshProUGUI BoardBpm(Board board)
++        {
++            var slot = board.Slot;
++            if (slot == null || board.Panel == null) return null;
++            if (slot.Bpm == null)
++            {
++                // The panel is 960 x 164 centred on the slot root and grows upwards while the board
++                // opens, so anchoring to the panel's own bottom-right corner keeps the number in the
++                // corner it belongs to, closed or open.
++                slot.Bpm = BpmReadout.Create(board.Panel.rectTransform, "Bpm", BpmReadout.SongBoardSize,
++                    new Vector2(1, 0), new Vector2(-16, 10));
++            }
++            return slot.Bpm;
+         }
+ 
+         // draw_folder_board / draw_back_board: the genre folder grows into folder_graphic with its two
+@@ -280,6 +299,12 @@ void FillCoursePanel(Board board)
+             header.Squeeze(1000);
+             headerSub.text = board.Info.Subtitle;
+             headerSub.Squeeze(1000);
++            // The stage is 1920x1080 with the title at (960, -178) and the subtitle at (960, -242);
++            // the 1200-wide header leaves the right end free, so the BPM sits there on the same line
++            // and clear of the FPS panel in the bottom-right corner.
++            courseBpm ??= BpmReadout.Create(coursePanel, "CourseBpm", BpmReadout.CourseSize,
++                new Vector2(1, 1), new Vector2(-40, -276));
++            BpmReadout.Show(courseBpm, board.Info.Bpm, true);
+         }
+ 
+         void DrawScoreRank(Board board, float p, float fade)
 diff --git a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
-index d9a51a1..3be2fe2 100644
+index d9a51a1..2bb3f1b 100644
 --- a/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
 +++ b/Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
-@@ -205,6 +205,17 @@ void Awake()
+@@ -91,6 +91,8 @@ sealed class Slot
+             public SongBoardView View;
+             public Vector2 PanelSize, GlowSize, TitlePosition, CrownPosition, CrownSize, RankPosition, RootOffset;
+             public Vector2[] PlateBase;
++            // BPM readout on the focused board's bottom-right corner; built once per slot.
++            public TextMeshProUGUI Bpm;
+             public bool Saved;
+         }
+         // Only boards on screen hold a view (Slot): the authored songs keep their saved scene
+@@ -147,6 +149,8 @@ sealed class CourseCard
+         Sprite[] uraToUraCells, uraToOniCells;
+         Image mark, backboard, back, option, auto, frame, glow, balloon, uraChange;
+         TextMeshProUGUI header, headerSub;
++        // Course panel BPM, under the subtitle at the panel's bottom-right.
++        TextMeshProUGUI courseBpm;
+         OptionPanel optionPanel, optionPanel2P;
+         // When 2P joined on this screen (its plate fades in); -inf when it came in already joined.
+         double secondJoinedAt = double.NegativeInfinity;
+@@ -205,6 +209,17 @@ void Awake()
              coursePanel.gameObject.SetActive(false);
              DrawOverlays(0);
              if (view.search != null) view.search.Bind(Manager);
@@ -2298,7 +2514,7 @@ index 1bba7eb..3b45836 100644
      }
  }
 diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
-index 7ad3669..c0ac0ce 100644
+index 7ad3669..6c122ac 100644
 --- a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
 +++ b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
 @@ -16,6 +16,8 @@ public sealed class SettingRow
@@ -2397,7 +2613,17 @@ index 7ad3669..c0ac0ce 100644
                          GeneralSettings.LanguageNames,
                          s => Array.IndexOf(GeneralSettings.Languages, s.general.Language),
                          (s, i) => s.general.language = GeneralSettings.Languages[i], list: true)),
-@@ -242,6 +248,15 @@ public static IReadOnlyList<SettingPage> Pages(SoundPlatform platform) => new[]
+@@ -236,12 +242,25 @@ public static IReadOnlyList<SettingPage> Pages(SoundPlatform platform) => new[]
+                         (s, i) => s.display.targetFrameRate = DisplaySettings.FrameRates[i]),
+                     SettingRow.Toggle("vsync", T("display.vsync"), T("display.vsyncDesc"),
+                         s => s.display.vSync, (s, on) => s.display.vSync = on)),
++                new SettingGroup("BPM",
++                    SettingRow.Toggle("show-bpm", "Show BPM",
++                        "Draws the chart's BPM as a small number: on every song board in the list, on the difficulty panel, and at the bottom right while playing.",
++                        s => s.display.ShowBpm, (s, on) => s.display.showBpm = on)),
+                 new SettingGroup(T("display.group.movie"),
+                     SettingRow.Toggle("movie", T("display.movie"), T("display.movieDesc"),
+                         s => s.display.backgroundMovie, (s, on) => s.display.backgroundMovie = on),
                      SettingRow.Number("lane-opacity", T("display.laneOpacity"), T("display.laneOpacityDesc"),
                          DisplaySettings.MovieLaneOpacityDefault, DisplaySettings.MovieLaneOpacityStep,
                          s => s.display.movieLaneOpacity, (s, v) => s.display.movieLaneOpacity = v, v => v + "%", 0, 100, slider: true, stepText: DisplaySettings.MovieLaneOpacityStep + "%")),
@@ -2413,7 +2639,7 @@ index 7ad3669..c0ac0ce 100644
              }),
              new SettingPage("sound", () => T("sound.title"), () => T("sound.subtitle"), s => Sound(platform, s.audio.Backend), audioOutput: true),
              new SettingPage("accounts", () => T("accounts.title"), () => T("accounts.subtitle"), _ => new[]
-@@ -297,16 +312,17 @@ static SettingRow[] Account(int seat)
+@@ -297,16 +316,17 @@ static SettingRow[] Account(int seat)
              string player = (seat + 1) + "P";
              return new[]
              {
@@ -2435,7 +2661,7 @@ index 7ad3669..c0ac0ce 100644
                  s => Mathf.Clamp(Mathf.RoundToInt(get(s.audio.volume) * 100 / 5f) * 5, 0, 200), (s, v) => set(s.audio.volume, v / 100f),
                  v => v + "%", 0, 200, slider: true, stepText: "5%");
  
-@@ -356,7 +372,7 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
+@@ -356,7 +376,7 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
                  SettingRow.Choice("backend", T("sound.backend"), T("sound.backendDesc"),
                      Array.ConvertAll(backends, b => b == AudioBackend.Automatic ? T("sound.automatic") : b.ToString()),
                      s => Array.IndexOf(backends, s.audio.backend), (s, i) => s.audio.backend = backends[i],
@@ -2444,7 +2670,7 @@ index 7ad3669..c0ac0ce 100644
              };
              // A backend this platform does not offer (a Windows settings file opened on a Mac) is shown
              // as Automatic by the row above, and AudioEngine falls back the same way; show its rows.
-@@ -365,12 +381,12 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
+@@ -365,12 +385,12 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
                  ? (platform == SoundPlatform.Windows ? AudioBackend.BassWASAPI : AudioBackend.BassSimple) : backend;
              if (selected == AudioBackend.BassSimple)
              {
@@ -2463,7 +2689,7 @@ index 7ad3669..c0ac0ce 100644
                  if (platform == SoundPlatform.Android)
                      output.Add(DeviceToggle("android-aaudio", T("sound.aaudio"), T("sound.aaudioDesc"), a => a.androidAAudio, (a, v) => a.androidAAudio = v));
              }
-@@ -402,9 +418,9 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
+@@ -402,9 +422,9 @@ public static IReadOnlyList<SettingGroup> Sound(SoundPlatform platform, AudioBac
                  new[] { T("sound.automatic"), T("sound.clock.heard"), T("sound.clock.sent") }, s => (int)s.audio.Clock, (s, i) => s.audio.clock = (AudioClock)i,
                  list: true, notes: new[]
                  {

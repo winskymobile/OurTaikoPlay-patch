@@ -50,6 +50,7 @@
 | `result-page` | 结算页文字、难度 / 判定 / 成绩 / 通关简繁切图 | `interface-language` |
 | `dan-page` | 段位道场文字、合格条件、确认框简繁切图 | `interface-language` |
 | `flying-notes` | 显示设置里的飞出音符绘制方式与数量 | `interface-language` |
+| `bpm-readout` | BPM 小字：曲目列表每张歌曲板右下角、难度选择页、演奏 HUD 右下角 | `interface-language` |
 
 ### 01 `macos-data-root`
 
@@ -147,10 +148,32 @@ Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs (+ .meta)
 
 不选这个模块时，显示页只有上游原有的背景影片设置。
 
+### 09 `bpm-readout`
+
+```
+Assets/OurTaiko/Runtime/Core/GameSettings.cs
+Assets/OurTaiko/Runtime/Core/UiText.cs
+Assets/OurTaiko/Runtime/Play/PlayScene.cs
+Assets/OurTaiko/Runtime/Scenes/BpmReadout.cs (+ .meta)
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Boards.cs
+Assets/OurTaiko/Runtime/Scenes/SongSelectScene.Drawing.cs
+Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+```
+
+谱面 BPM 以小字显示在三处，全部在运行时生成，不改场景和 prefab：
+
+- 选曲：列表里每张歌曲板都在自己的右下角显示；选中的那张随板面展开，数字仍在右下角；
+- 难度选择：标题与副标题右侧，`BPM` 与难度卡片同一屏；
+- 演奏：1920×1080 画面的右下角，底部页脚上方；演奏中随变速谱面更新。
+
+显示设置新增 `BPM` 分组，开关 `Show BPM`（默认开），保存在
+`settings.json` 的 `display.showBpm`。关闭后三处同时隐藏。
+
 ## 预设
 
-- `core`：除 `flying-notes` 外的全部模块
-- `full`：全部 8 个模块
+- `core`：除 `flying-notes` 外的全部模块（含 `bpm-readout`）
+- `full`：全部 9 个模块
 - `data-only`：只装 `macos-data-root`
 - `language-only`：只装 `interface-language`
 
@@ -161,7 +184,7 @@ Assets/OurTaiko/Tests/EditMode/FlyingNoteDrawTests.cs (+ .meta)
 | 序号 | 功能 | 展开的模块 |
 | --- | --- | --- |
 | 1 | 数据目录迁移 | `macos-data-root` |
-| 2 | 界面与游戏内文字 | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page` |
+| 2 | 界面与游戏内文字（含 BPM 读数） | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page`、`bpm-readout` |
 | 3 | 飞出音符 | `flying-notes`（自动补 `interface-language`） |
 
 也可以非交互指定：
@@ -212,7 +235,7 @@ tools/patch-app.sh --source tools/build/source-1.0.1-511 \
 
 ```
 MonoBehaviour layout breaks: 0
-458 rows, 84 keys used by the runtime
+460 rows, 84 keys used by the runtime
 translations OK
 ```
 

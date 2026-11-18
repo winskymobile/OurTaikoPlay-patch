@@ -4,11 +4,11 @@ base|fbcaaf1
 
 # feature|number|name|title|module ids (coarse groups for --feature)
 feature|1|data|数据目录迁移|macos-data-root
-feature|2|text|界面与游戏内文字|interface-language entry-online-text play-text song-select-text result-page dan-page
+feature|2|text|界面与游戏内文字（含 BPM 读数）|interface-language entry-online-text play-text song-select-text result-page dan-page bpm-readout
 feature|3|flying|飞出音符|flying-notes
 
 # preset|name|module ids (space separated; presets may name other presets)
-preset|core|macos-data-root interface-language entry-online-text play-text song-select-text result-page dan-page
+preset|core|macos-data-root interface-language entry-online-text play-text song-select-text result-page dan-page bpm-readout
 preset|full|core flying-notes
 preset|data-only|macos-data-root
 preset|language-only|interface-language
@@ -22,3 +22,4 @@ module|song-select-text|05-song-select-text.patch|interface-language|选曲界�
 module|result-page|06-result-page.patch|interface-language|结算页文字与简繁切图
 module|dan-page|07-dan-page.patch|interface-language|段位道场文字与简繁切图
 module|flying-notes|08-flying-notes.patch|interface-language|飞出音符（绘制方式 / 数量，可选）
+module|bpm-readout|09-bpm-readout.patch|interface-language|BPM 读数（选中的歌曲板右下角 / 难度选择页 / 演奏右下角，可在设置关闭）

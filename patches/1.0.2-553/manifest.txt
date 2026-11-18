@@ -1,0 +1,25 @@
+# base is the upstream commit the first module patch is cut against.
+base|c1982e5605cc79c81e86bc57ba7c0809e8819f4f
+
+# feature|number|name|title|module ids (coarse groups for --feature)
+feature|1|data|数据目录迁移|macos-data-root
+feature|2|text|界面与游戏内文字（含 BPM 读数）|interface-language entry-online-text play-text song-select-text result-page dan-page bpm-readout
+feature|3|flying|飞出音符|flying-notes
+
+# preset|name|module ids (space separated; presets may name other presets)
+preset|core|macos-data-root interface-language entry-online-text play-text song-select-text result-page dan-page bpm-readout
+preset|full|core flying-notes
+preset|data-only|macos-data-root
+preset|language-only|interface-language
+
+# Modules apply in manifest order; each patch's preimage is the preceding tree.
+# module|id|patch file|requires (space separated)|title
+module|macos-data-root|01-macos-data-root.patch||macOS 数据目录（Application Support + 首次迁移）
+module|interface-language|02-interface-language.patch||界面译文核心（日 / 简 / 繁，含游戏内字体）
+module|entry-online-text|03-entry-online-text.patch|interface-language|入口、在线账号与提示文字
+module|play-text|04-play-text.patch|interface-language|演奏、暂停、练习与加载文字
+module|song-select-text|05-song-select-text.patch|interface-language|选曲界面文字
+module|result-page|06-result-page.patch|interface-language|结算页文字与简繁切图
+module|dan-page|07-dan-page.patch|interface-language|段位道场文字与简繁切图
+module|flying-notes|08-flying-notes.patch|interface-language|飞出音符（绘制方式 / 数量，可选）
+module|bpm-readout|09-bpm-readout.patch|interface-language|BPM 读数（歌曲板 / 难度选择 / 演奏 HUD，可在设置关闭）

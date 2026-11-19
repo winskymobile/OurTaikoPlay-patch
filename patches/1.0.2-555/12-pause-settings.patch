@@ -1,0 +1,102 @@
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
+index 8fc31d7d..cf2038eb 100644
+--- a/Assets/OurTaiko/Runtime/Core/UiText.cs
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
+@@ -252,6 +252,8 @@ public static class UiText
+             ["Restart"] = Row("はじめから", "重开", "重開"),
+             ["Back to Song Select"] = Row("曲選択にもどる", "返回选曲", "返回選曲"),
+             ["PAUSED"] = Row("一時停止", "已暂停", "已暫停"),
++            ["Game Settings"] = Row("ゲーム設定", "游戏设置", "遊戲設定"),
++            ["Game Settings"] = Row("ゲーム設定", "游戏设置", "遊戲設定"),
+             ["CHART COULD NOT LOAD"] = Row("譜面を読み込めませんでした", "谱面无法加载", "譜面無法載入"),
+             ["谱面分支"] = Row("譜面分岐", "谱面分支", "譜面分支"),
+             ["普通譜面"] = Row("普通譜面", "普通谱面", "普通譜面"),
+diff --git a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
+index 57448195..3013128f 100644
+--- a/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
++++ b/Assets/OurTaiko/Runtime/Play/PauseMenuView.cs
+@@ -25,6 +25,8 @@ public sealed class PauseMenuView : MonoBehaviour
+         public AudioSource Sfx => sfx != null ? sfx : sfx = NewSfx();
+         AudioSource sfx;
+         Coroutine opening;
++        // The settings row appended under Back (see AddSettingsButton).
++        Button settingsButton;
+         // Whether the mode switch leads back to a normal play (it is offered in practice).
+         bool switchesToNormal;
+ 
+@@ -35,6 +37,7 @@ public sealed class PauseMenuView : MonoBehaviour
+         void Awake()
+         {
+             if (sfx == null) sfx = NewSfx();
++            AddSettingsButton();
+             // Keyboard/drum confirmation invokes onClick too, so every way of choosing an action sounds once.
+             foreach (var button in buttons) button.onClick.AddListener(PlayConfirm);
+         }
+@@ -115,6 +118,57 @@ void ApplyLanguage()
+                     InGameFont.Use(texts[i]);
+                 }
+             }
++            ShowSettingsLabel();
++        }
++
++        // The pause menu is a fixed prefab: Resume, Restart, the mode switch and Back. The settings
++        // overlay is reachable from Entry, so changing an offset mid-song meant leaving the play.
++        // This appends one more row under Back, in the space the hint line leaves, and moves the
++        // hint under it. Nothing else in the panel moves, so the authored layout keeps its spacing.
++        void AddSettingsButton()
++        {
++            if (buttons == null || buttons.Length == 0) return;
++            var template = buttons[buttons.Length - 1];
++            var row = Instantiate(template, template.transform.parent);
++            row.name = "SettingsButton";
++            // The prefab's labels follow LocalizedText; this row sets its own text in ShowSettingsLabel.
++            foreach (var localized in row.GetComponentsInChildren<LocalizedText>(true)) Destroy(localized);
++            // Instantiate copies the template's wired click (Back to Song Select): start empty.
++            row.onClick = new Button.ButtonClickedEvent();
++            row.onClick.AddListener(OpenSettings);
++            var rect = (RectTransform)row.transform;
++            rect.anchoredPosition = new Vector2(0, -630);
++            rect.sizeDelta = new Vector2(750, 72);
++            settingsButton = row;
++            int index = buttons.Length;
++            System.Array.Resize(ref buttons, index + 1);
++            buttons[index] = row;
++            foreach (var text in GetComponentsInChildren<TMP_Text>(true))
++                if (text.gameObject.name == "Hint")
++                    ((RectTransform)text.transform).anchoredPosition = new Vector2(0, -714);
++            ShowSettingsLabel();
++        }
++
++        void ShowSettingsLabel()
++        {
++            var label = settingsButton != null ? settingsButton.GetComponentInChildren<TMP_Text>(true) : null;
++            if (label == null) return;
++            label.text = UiText.InGame("Game Settings");
++            InGameFont.Use(label);
++        }
++
++        void OpenSettings()
++        {
++            if (SettingsOverlay.IsOpen) return;
++            var overlay = SettingsOverlay.Open();
++            if (overlay != null) overlay.Closed += OnSettingsClosed;
++        }
++
++        // The language can be changed inside the overlay; the pause menu follows it.
++        void OnSettingsClosed()
++        {
++            if (SettingsOverlay.Instance != null) SettingsOverlay.Instance.Closed -= OnSettingsClosed;
++            ApplyLanguage();
+         }
+ 
+         public IEnumerator Hide()
+@@ -145,7 +199,8 @@ IEnumerator Fade(float target)
+ 
+         public void HandleInput()
+         {
+-            if (IsClosing || !group.interactable) return;
++            // The settings overlay reads the same presses while it is up.
++            if (IsClosing || !group.interactable || SettingsOverlay.IsOpen) return;
+             // One menu action per frame, preserving the order captured by InputManager.
+             foreach (var press in InputManager.PlayerPresses)
+             {

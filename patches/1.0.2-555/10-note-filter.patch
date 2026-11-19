@@ -1,0 +1,91 @@
+diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+index 062a45cd..17e3e7bf 100644
+--- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
++++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+@@ -218,5 +218,9 @@ public int TargetFrameRate
+         // while a difficulty is chosen, and in the play HUD.
+         public bool showBpm = true;
+         public bool ShowBpm => showBpm;
++        // Draw the notes with bilinear filtering instead of the skin's point sampling. Point keeps
++        // hard edges but crawls when the canvas scales the note atlas up (a Retina Mac runs the
++        // 1920 design at 1.8x); bilinear keeps the edge steady while the lane moves.
++        public bool smoothNotes = true;
+     }
+ }
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
+index a14e6e9f..ce3c267e 100644
+--- a/Assets/OurTaiko/Runtime/Core/UiText.cs
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
+@@ -50,6 +50,11 @@ public static class UiText
+                 Row("譜面の BPM を小さな数字で表示します。曲リストの各曲板、難易度選択、演奏中の右下に出ます。",
+                     "以很小的数字显示谱面 BPM：曲目列表的每张歌曲板、难度选择页和游玩时右下角。",
+                     "以很小的數字顯示譜面 BPM：曲目列表的每張歌曲板、難度選擇頁和遊玩時右下角。"),
++            ["Smooth Notes"] = Row("音符をなめらかに", "平滑音符", "平滑音符"),
++            ["Bilinear filtering instead of the skin's point sampling: note edges stay steady while the lane moves, at a slightly softer look."] =
++                Row("スキンの点サンプリングの代わりにバイリニアで描画します。流れる音符の輪郭が安定する代わりに、少しやわらかく見えます。",
++                    "用双线性过滤代替皮肤的点采样绘制音符：音符移动时边缘更稳定，观感会略微柔和。",
++                    "用雙線性過濾代替皮膚的點取樣繪製音符：音符移動時邊緣更穩定，觀感會略微柔和。"),
+             ["Background Movie"] = Row("背景動画", "背景影片", "背景影片"),
+             ["Play the chart's background movie behind the lanes, and download it with online charts."] =
+                 Row("譜面の背景動画をレーンの後ろで再生し、オンライン譜面では一緒にダウンロードします。",
+diff --git a/Assets/OurTaiko/Runtime/Play/NoteLaneRenderer.cs b/Assets/OurTaiko/Runtime/Play/NoteLaneRenderer.cs
+index d1aa4598..4ab94cb4 100644
+--- a/Assets/OurTaiko/Runtime/Play/NoteLaneRenderer.cs
++++ b/Assets/OurTaiko/Runtime/Play/NoteLaneRenderer.cs
+@@ -323,11 +323,42 @@ Vector2 Position(ChartNote note, double time)
+             var (x, y) = NoteScroll.Distance(note, time, clocks, TravelDistance);
+             return new Vector2(judge.x + (float)x, judge.y - (float)y);
+         }
++
++        // The skin's note atlases are imported with point sampling. That keeps a hard edge, but at
++        // a canvas scale above 1 (a Retina Mac runs the 1920 design at 1.8x) each texel covers two
++        // or three pixels and the edge crawls while the lane moves. Bilinear trades a little
++        // sharpness for a steady edge; Settings > Display > Smooth Notes picks between them. Read it
++        // every frame so the row applies as soon as a paused play resumes.
++        bool? smoothNotes;
++        void ApplyNoteFilter()
++        {
++            bool smooth = SettingManager.Instance == null || SettingManager.Instance.Settings.display.smoothNotes;
++            if (smoothNotes == smooth) return;
++            smoothNotes = smooth;
++            var mode = smooth ? FilterMode.Bilinear : FilterMode.Point;
++            SetFilter(noteSprites, mode);
++            SetFilter(alternateNoteSprites, mode);
++            SetFilter(rollBodySprites, mode);
++            SetFilter(rollTailSprites, mode);
++            SetFilter(mojiSprites, mode);
++            SetFilter(balloonTailSprite, mode);
++            SetFilter(mojiRollSprite, mode);
++        }
++        static void SetFilter(Sprite[] sprites, FilterMode mode)
++        {
++            if (sprites == null) return;
++            for (int i = 0; i < sprites.Length; i++) SetFilter(sprites[i], mode);
++        }
++        static void SetFilter(Sprite sprite, FilterMode mode)
++        {
++            if (sprite != null && sprite.texture != null) sprite.texture.filterMode = mode;
++        }
+         // Draws `session` at `time`. `preview` shows the routes a paused practice would play;
+         // `hideSkipped` hides notes the practice attempt skipped. Returns false for an unchanged frame.
+         public bool Render(PlaySession session, double time, bool preview, bool hideSkipped)
+         {
+             Session = session;
++            ApplyNoteFilter();
+             // #JPOSSCROLL moves the origin notes are placed from (OpenTaiko GetNoteOriginX/Y).
+             var shift = JudgeShift.At(session.Chart.JudgeMoves, time);
+             judge = new Vector2(JudgeLocalX + (float)shift.X, JudgeLocalY - (float)shift.Y);
+diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+index 51118b47..15877b96 100644
+--- a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
++++ b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+@@ -297,6 +297,9 @@ static IEnumerable<SettingRow> Rendering(SoundPlatform platform)
+                 yield return SettingRow.Toggle("vsync", T("display.vsync"), T("display.vsyncDesc"),
+                     s => s.display.vSync, (s, on) => s.display.vSync = on);
+             }
++            yield return SettingRow.Toggle("smooth-notes", "Smooth Notes",
++                "Bilinear filtering instead of the skin's point sampling: note edges stay steady while the lane moves, at a slightly softer look.",
++                s => s.display.smoothNotes, (s, on) => s.display.smoothNotes = on);
+             yield return SettingRow.Toggle("chara-3d", T("display.chara3D"), T("display.chara3DDesc"),
+                 s => s.display.chara3D, (s, on) => s.display.chara3D = on);
+         }

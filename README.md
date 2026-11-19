@@ -3,14 +3,14 @@
 给已安装的 **OurTaikoPlay.app**（Unity 6000.6.7f1 / 6000.6.8f1 + Mono 后端）打补丁，
 **不需要 Unity 编辑器**。补丁按模块拆分，可以只装数据目录、只装译文，或加装飞出音符。
 
-## 1.0.2-553
+## 1.0.2-555
 
-当前基线是 `patches/1.0.2-553/`，对应上游提交 `c1982e5`。模块清单和依赖写在
-`patches/1.0.2-553/manifest.txt`，补丁按清单顺序逐项重放。553 上游新增的 Linux 音频输出与在线资源路由已兼容，设置页保留独占输出设备信息。
+当前基线是 `patches/1.0.2-555/`，对应上游提交 `067a25a9`。模块清单和依赖写在
+`patches/1.0.2-555/manifest.txt`，补丁按清单顺序逐项重放。555 在上游把设置侧栏的「关闭」拆成独立项、并把显示页的帧率行抽成 `Rendering(platform)`，这两处的译文与 BPM 分组已跟着新结构重放。
 
-- 553 补丁基于 531 的九个模块，简繁字体、结算和段位切图仍嵌入 `OurTaiko.Runtime.dll`。
+- 555 补丁基于 553 的九个模块，另加音符平滑与窗口模式两个模块，简繁字体、结算和段位切图仍嵌入 `OurTaiko.Runtime.dll`。
 - BPM 读数可在设置里关闭；飞出音符仍是可选模块。
-- 补丁在 553 原版 DLL 上通过编译、译文与序列化字段布局检查。
+- 补丁在 555 原版 DLL 上通过编译、译文与序列化字段布局检查。
 
 - 韩文已经从 `UiText` 译文表移除；保留日文、简体、繁体三列。
 - 设置页语言行仍按上游提供英 / 日 / 简；繁体译文表保留给已有 `zh_tw` 设置和结算测试。
@@ -20,8 +20,8 @@
 - 在线入口仍是 `net.ourtaiko.org` 单点登录与整站加载；入口与在线文字模块保持 511 的结构。
 - BPM 读数是可选文字模块，包含在 `core` / `full` 中，可在设置里关闭。
 
-旧版存档仍在仓库根目录：`play-preferences-1.0.2-531.patch`、`play-preferences-1.0.1-524.patch`、
-`play-preferences-1.0.1-511.patch`、`play-preferences-1.0.1-507.patch`、
+旧版存档仍在仓库根目录：`play-preferences-1.0.2-553.patch`、`play-preferences-1.0.2-531.patch`、
+`play-preferences-1.0.1-524.patch`、`play-preferences-1.0.1-511.patch`、`play-preferences-1.0.1-507.patch`、
 `play-preferences-1.0.1-505.patch`、`play-preferences-1.0.1-480.patch`、`play-preferences.patch`（467 及以前）。
 
 ## 快速使用
@@ -62,7 +62,7 @@ tools/patch-app.sh --preset core --with flying-notes
 tools/patch-app.sh --preset core --without result-page
 
 # 手工解决冲突后，直接编译当前源码树
-tools/patch-app.sh --source tools/build/source-1.0.2-553 --from-tree
+tools/patch-app.sh --source tools/build/source-1.0.2-555 --from-tree
 
 # 只编译和检查，不安装
 tools/patch-app.sh --preset full --no-install
@@ -85,6 +85,9 @@ tools/patch-app.sh --preset full --no-install --no-fetch
 | 1 | 数据目录迁移 | `macos-data-root` |
 | 2 | 界面与游戏内文字（含 BPM 读数） | `interface-language`、`entry-online-text`、`play-text`、`song-select-text`、`result-page`、`dan-page`、`bpm-readout` |
 | 3 | 飞出音符 | `flying-notes`（自动补 `interface-language`） |
+| 4 | 音符平滑 | `note-filter`（自动补 `interface-language`） |
+| 5 | 窗口模式与尺寸 | `window-mode` |
+| 6 | 暂停菜单设置入口 | `pause-settings`（自动补 `interface-language`） |
 
 `--feature` 与 `--preset`、`--with`、`--without` 可以混用；序号、预设名、模块 id
 都会展开成模块列表，例如：
@@ -108,6 +111,9 @@ tools/patch-app.sh --with flying-notes
 | `dan-page` | 段位道场文字，合格条件与确认框简繁切图 | `interface-language` |
 | `flying-notes` | 显示设置新增「飞出音符」（图片 / 精灵）与「飞出数量」（高 / 中 / 低） | `interface-language` |
 | `bpm-readout` | BPM 小字：歌曲板右下角、难度选择页、演奏右下角；可在显示设置关闭 | `interface-language` |
+| `note-filter` | 音符图集改用 Bilinear 采样，消除 Retina 放大时的边缘蠕动；可在显示设置关闭 | `interface-language` |
+| `window-mode` | 显示设置新增「窗口模式」（全屏 / 窗口）与「窗口大小」（1280×720–2560×1440，均 16:9） | 无 |
+| `pause-settings` | 暂停菜单新增「游戏设置」入口，可直接打开设置面板 | `interface-language` |
 
 预设：`core`（除飞出音符外的全部）、`full`（全部）、`data-only`、`language-only`。
 
@@ -157,7 +163,7 @@ tools/restore.sh
 ## 目录
 
 ```
-patches/1.0.2-553/                        553 的模块补丁与清单
+patches/1.0.2-555/                        555 的模块补丁与清单
   manifest.txt                            基线、预设、模块依赖
   01-macos-data-root.patch                macOS 数据目录
   02-interface-language.patch             界面译文核心
@@ -168,7 +174,11 @@ patches/1.0.2-553/                        553 的模块补丁与清单
   07-dan-page.patch                       段位页文字与切图
   08-flying-notes.patch                   飞出音符（可选）
   09-bpm-readout.patch                    BPM 读数
-play-preferences-1.0.2-553.patch          553 的合并补丁（手工重放时用）
+  10-note-filter.patch                    音符平滑（Bilinear）
+  11-window-mode.patch                    窗口模式与尺寸
+  12-pause-settings.patch                 暂停菜单的「游戏设置」入口
+play-preferences-1.0.2-555.patch          555 的合并补丁（手工重放时用）
+play-preferences-1.0.2-553.patch          553 的合并补丁（存档）
 play-preferences-1.0.2-531.patch          531 的合并补丁（存档）
 play-preferences-1.0.1-524.patch          524 的合并补丁（存档）
 play-preferences-1.0.1-511.patch          511 的合并补丁（存档）
@@ -199,10 +209,10 @@ backup/                                   原版 DLL 与设置备份（不进仓
 tools/save-original.sh
 
 # 1) 编译
-tools/build-runtime-dll.sh tools/build/source-1.0.2-553 /Applications/OurTaikoPlay.app tools/build/1.0.2-553
+tools/build-runtime-dll.sh tools/build/source-1.0.2-555 /Applications/OurTaikoPlay.app tools/build/1.0.2-555
 
 # 2) 安装
-tools/install.sh tools/build/1.0.2-553/OurTaiko.Runtime.dll
+tools/install.sh tools/build/1.0.2-555/OurTaiko.Runtime.dll
 ```
 
 安装前会检查 `backup/OurTaiko.Runtime.<版本>.original.dll` 的字段布局；布局不一致会直接
@@ -217,15 +227,15 @@ tools/patch-app.sh --list
 tools/patch-app.sh --preset core --launch
 ```
 
-如果 app 版本还没有对应目录，先从上游建立新的 `patches/<版本>/`。当前 553 的流程是：
+如果 app 版本还没有对应目录，先从上游建立新的 `patches/<版本>/`。当前 555 的流程是：
 
 ```bash
-cd tools/build/source-1.0.2-553
+cd tools/build/source-1.0.2-555
 git fetch upstream
-git checkout -B play-preferences c1982e5
+git checkout -B play-preferences 067a25a9
 
 # 逐个应用模块，或直接用合并补丁
-git apply --3way ../../../play-preferences-1.0.2-553.patch
+git apply --3way ../../../play-preferences-1.0.2-555.patch
 ```
 
 更推荐直接用脚本：它按 manifest 顺序逐个应用，自动补依赖，并在安装前跑布局与译文闸门。
@@ -237,8 +247,8 @@ tools/patch-app.sh --preset full --no-install
 ## 自检
 
 ```bash
-tools/check-layout.sh backup/OurTaiko.Runtime.1.0.2-553.original.dll tools/build/1.0.2-553/OurTaiko.Runtime.dll
-python3 tools/check-translations.py tools/build/source-1.0.2-553
+tools/check-layout.sh backup/OurTaiko.Runtime.1.0.2-555.original.dll tools/build/1.0.2-555/OurTaiko.Runtime.dll
+python3 tools/check-translations.py tools/build/source-1.0.2-555
 ```
 
 `check-layout.sh` 必须输出 `MonoBehaviour layout breaks: 0`，`check-translations.py` 必须输出

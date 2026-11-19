@@ -1,0 +1,125 @@
+diff --git a/Assets/OurTaiko/Runtime/Core/GameSettings.cs b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+index 17e3e7bf..923921dd 100644
+--- a/Assets/OurTaiko/Runtime/Core/GameSettings.cs
++++ b/Assets/OurTaiko/Runtime/Core/GameSettings.cs
+@@ -198,6 +198,62 @@ public void Apply()
+             Application.targetFrameRate = TargetFrameRate;
+             // Android gives a game 60 Hz until it asks for more; see DisplayRefreshRate.
+             DisplayRefreshRate.Request(Application.platform == RuntimePlatform.Android || targetFrameRate == Unlimited ? 0 : TargetFrameRate);
++            ApplyWindow();
++        }
++
++        // 0: the borderless full-screen window the player ships with. 1: a normal window at
++        // WindowSize, which is what makes the window movable and fit on a shared display.
++        public bool windowed;
++        // All 16:9, so a window fills the 1920x1080 stage exactly and no letterbox bars appear.
++        public static readonly int[] WindowWidths = { 1280, 1600, 1920, 2560 };
++        public static readonly int[] WindowHeights = { 720, 900, 1080, 1440 };
++        public int windowSize = 1;
++        public int WindowSize => Math.Clamp(windowSize, 0, WindowWidths.Length - 1);
++        public int WindowWidth => WindowWidths[WindowSize];
++        public int WindowHeight => WindowHeights[WindowSize];
++
++        // Applied from Apply() (the settings overlay calls it on every change): only when the mode
++        // or the size really changed, so editing another row never snaps back a window the player
++        // has just moved or resized.
++        [NonSerialized] bool windowApplied;
++        [NonSerialized] bool appliedWindowed;
++        [NonSerialized] int appliedWindowSize;
++
++        void ApplyWindow()
++        {
++            if (Application.platform != RuntimePlatform.OSXPlayer && Application.platform != RuntimePlatform.WindowsPlayer
++                && Application.platform != RuntimePlatform.LinuxPlayer) return;
++            if (windowApplied && appliedWindowed == windowed && appliedWindowSize == windowSize) return;
++            windowApplied = true;
++            appliedWindowed = windowed;
++            appliedWindowSize = windowSize;
++            if (windowed)
++            {
++                // Unity resolves in pixels while the rows read as points: on a Retina Mac a
++                // 1600x900 window would otherwise be 800x450 points, half the size the row says.
++                // Twice the size on macOS; a display too small for it gets the largest 16:9 that
++                // fits instead of a window hanging off the screen.
++                int scale = Application.platform == RuntimePlatform.OSXPlayer ? 2 : 1;
++                int width = WindowWidth * scale, height = WindowHeight * scale;
++                // Either source may be points or pixels depending on the platform; the larger
++                // one is the display as the window has to fit on it.
++                var display = Display.main;
++                int screenWidth = Math.Max(Screen.currentResolution.width, display != null ? display.systemWidth : 0);
++                int screenHeight = Math.Max(Screen.currentResolution.height, display != null ? display.systemHeight : 0);
++                if (screenWidth > 0 && screenHeight > 0 && (width > screenWidth || height > screenHeight))
++                {
++                    float fit = Math.Min((float)screenWidth / width, (float)screenHeight / height);
++                    width = Mathf.RoundToInt(width * fit);
++                    height = Mathf.RoundToInt(height * fit);
++                }
++                Screen.SetResolution(width, height, FullScreenMode.Windowed);
++                Log.Info("Display", "window " + width + "x" + height + " (" + WindowWidth + "x" + WindowHeight + " pt)");
++            }
++            else
++            {
++                Screen.SetResolution(Screen.currentResolution.width, Screen.currentResolution.height, FullScreenMode.FullScreenWindow);
++                Log.Info("Display", "full screen " + Screen.currentResolution.width + "x" + Screen.currentResolution.height);
++            }
+         }
+ 
+         // Android can divide the active refresh rate down when a fixed cap does not align with it.
+diff --git a/Assets/OurTaiko/Runtime/Core/UiText.cs b/Assets/OurTaiko/Runtime/Core/UiText.cs
+index ce3c267e..8fc31d7d 100644
+--- a/Assets/OurTaiko/Runtime/Core/UiText.cs
++++ b/Assets/OurTaiko/Runtime/Core/UiText.cs
+@@ -50,6 +50,30 @@ public static class UiText
+                 Row("譜面の BPM を小さな数字で表示します。曲リストの各曲板、難易度選択、演奏中の右下に出ます。",
+                     "以很小的数字显示谱面 BPM：曲目列表的每张歌曲板、难度选择页和游玩时右下角。",
+                     "以很小的數字顯示譜面 BPM：曲目列表的每張歌曲板、難度選擇頁和遊玩時右下角。"),
++            ["Window Mode"] = Row("ウィンドウモード", "窗口模式", "視窗模式"),
++            ["Full Screen"] = Row("全画面", "全屏", "全螢幕"),
++            ["Window"] = Row("ウィンドウ", "窗口", "視窗"),
++            ["Full Screen fills the display; Window runs in a 16:9 window at the size below."] =
++                Row("全画面はディスプレイ全体を使います。ウィンドウは下のサイズで 16:9 の窓になります。",
++                    "全屏使用整个显示器；窗口模式按下方的尺寸开一个 16:9 的窗口。",
++                    "全螢幕使用整個顯示器；視窗模式按下方的尺寸開一個 16:9 的視窗。"),
++            ["Window Size"] = Row("ウィンドウサイズ", "窗口大小", "視窗大小"),
++            ["The window's size while Window Mode is Window. Every choice is 16:9."] =
++                Row("ウィンドウモードのときの大きさです。すべて 16:9 です。",
++                    "窗口模式下的尺寸，全部为 16:9。",
++                    "視窗模式下的尺寸，全部為 16:9。"),
++            ["Window Mode"] = Row("ウィンドウモード", "窗口模式", "視窗模式"),
++            ["Full Screen"] = Row("全画面", "全屏", "全螢幕"),
++            ["Window"] = Row("ウィンドウ", "窗口", "視窗"),
++            ["Full Screen fills the display; Window runs in a 16:9 window at the size below."] =
++                Row("全画面はディスプレイ全体を使います。ウィンドウは下のサイズで 16:9 の窓になります。",
++                    "全屏使用整个显示器；窗口模式按下方的尺寸开一个 16:9 的窗口。",
++                    "全螢幕使用整個顯示器；視窗模式按下方的尺寸開一個 16:9 的視窗。"),
++            ["Window Size"] = Row("ウィンドウサイズ", "窗口大小", "視窗大小"),
++            ["The window's size while Window Mode is Window. Every choice is 16:9."] =
++                Row("ウィンドウモードのときの大きさです。すべて 16:9 です。",
++                    "窗口模式下的尺寸，全部为 16:9。",
++                    "視窗模式下的尺寸，全部為 16:9。"),
+             ["Smooth Notes"] = Row("音符をなめらかに", "平滑音符", "平滑音符"),
+             ["Bilinear filtering instead of the skin's point sampling: note edges stay steady while the lane moves, at a slightly softer look."] =
+                 Row("スキンの点サンプリングの代わりにバイリニアで描画します。流れる音符の輪郭が安定する代わりに、少しやわらかく見えます。",
+diff --git a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+index 15877b96..347c8f41 100644
+--- a/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
++++ b/Assets/OurTaiko/Runtime/Settings/SettingsCatalog.cs
+@@ -288,6 +288,18 @@ static SettingPage[] Categories(SoundPlatform platform) => new[]
+ 
+         static IEnumerable<SettingRow> Rendering(SoundPlatform platform)
+         {
++            // The window rows are for the players that own a window; mobile ignores them.
++            if (platform == SoundPlatform.Desktop || platform == SoundPlatform.Windows)
++            {
++                yield return SettingRow.Choice("window-mode", "Window Mode",
++                    "Full Screen fills the display; Window runs in a 16:9 window at the size below.",
++                    new[] { "Full Screen", "Window" },
++                    s => s.display.windowed ? 1 : 0, (s, i) => s.display.windowed = i == 1);
++                yield return SettingRow.Choice("window-size", "Window Size",
++                    "The window's size while Window Mode is Window. Every choice is 16:9.",
++                    new[] { "1280 × 720", "1600 × 900", "1920 × 1080", "2560 × 1440" },
++                    s => s.display.WindowSize, (s, i) => s.display.windowSize = i);
++            }
+             if (platform != SoundPlatform.Android)
+             {
+                 yield return SettingRow.Choice("frame-rate", T("display.frameRate"), T("display.frameRateDesc"),
